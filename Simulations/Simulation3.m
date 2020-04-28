@@ -1,7 +1,8 @@
 
+% simulations = {'DR', 'PF_EKF', 'Policy', 'Full', 'eight', 'six', 'four', 'two', 'one', 'half', 'quart'};
 
 
-function rAd = Simulation3(num_trials, num_auv, ~, bathy, saveResults, wpFile, count, plotIO)
+function [rAd, coms_policy] = Simulation3(num_trials, num_auv, maxErr, simulations, bathy, saveResults, wpFile, count, plotIO)
 
 [path, name, ext] = fileparts(saveResults);
 
@@ -12,10 +13,6 @@ for vv = num_auv:-1:1
     dataTypes{num_auv+1+vv} = sprintf('Comms%d',vv);
 end
 dataTypes{num_auv+1} = 'Time';
-
-
-% simulations = {'DR', 'PF_EKF', 'Policy', 'Full', 'eight', 'six', 'four', 'two'};
-simulations = {'Policy', 'half', 'quart'};
 
 
 rAd = RandomAssData([3000,num_trials], simulations, dataTypes);             % Instanciate RandomAssData
@@ -40,12 +37,13 @@ end
 
 
 coms_policy = zeros(num_auv, 2000);                                         % Peralocate space for coms policy
-
+disp('Start Communications Planning')
 dt = 0.5;                                                                   % Planning time step
-for vv = num_auv: -1: 1                                                     % Do Planning
+parfor vv = 1:num_auv                                                       % Do Planning
     
-    policy = auv(vv).Planning.Plan(3000, dt, 1.25);
-    coms_policy(vv, 1:size(policy,2) ) = policy;
+    policy = auv(vv).Planning.Plan(2000, dt, maxErr);
+    policy(end+1:2000) = false;
+    coms_policy(vv, :) = policy;
  
     sz(vv) = numel(policy);
 
@@ -54,11 +52,13 @@ end
 sz = max(sz);
 fprintf('\n\nFinished Communications Planning\n\n')
 
+save(filepath, 'coms_policy', 'rAd')
 
 
 % ___ Run Simulation ______________________________________________________
 for iter = 1 :num_trials
-    for sim  = 1 : numel(simulations), fprintf("\n\nIteration: %i, Simulation: %s\n\n", iter, simulations{sim})
+    disp('____________________________________________________________________________________')
+    for sim  = 1 : numel(simulations), fprintf("Iteration: %i, Simulation: %s", iter, simulations{sim})
         
         % --- Fresh Robots ---
         clear auv
@@ -105,10 +105,9 @@ for iter = 1 :num_trials
         turn = 1;
         finish = false;
         
-        disp('Starting Simulation')
-        tic
         
-        % Run Simulation
+        % ==== Run Simulation =============================================
+        tic
         while toc < 1000
             
             % ____ Take Measurments _________________________________________
@@ -121,16 +120,11 @@ for iter = 1 :num_trials
             % ___ Localization Update _____________________________________________
             switch simulations{sim}
                 
-                case 'DR' % Dear Reckoning Just Guesses
-                    COMMS(ii,:) = false(1,num_auv);
-                
+                case 'DR' % Dead Reckoning Just Guesses
                     
                     
                 case 'PF_EKF'
                     for vv = 1: num_auv, auv(vv) = auv(vv).UpdatePF(dt); end
-                    
-                    COMMS(ii,:) = false(1,num_auv);
-                    
                     
 
                 case 'Full'
@@ -143,7 +137,6 @@ for iter = 1 :num_trials
                         end
                     end
                     
-                    COMMS(ii,:) = false(1,num_auv);
                     COMMS(ii,turn) = true;
                     
                     turn = turn +1;
@@ -205,6 +198,8 @@ for iter = 1 :num_trials
                 if auv(jj).Goal_Achived(0.5)||auv(jj).Nav.Done, finish = true; end  % Check for goal
             end
             
+            
+            % ___ Check For Goal __________________________________________
             if finish
                 
                 for jj = num_auv: -1: 1, stats(jj) = auv(jj).PathStates(false); end
@@ -219,7 +214,7 @@ for iter = 1 :num_trials
                     rAd = rAd.Add_Result(iter, simulations{sim}, d{:}); % Add data to the respective set
                 end
                 
-                save(filepath, 'rAd')
+                save(filepath, 'coms_policy', 'rAd')
                 
                 break 
             end
@@ -236,8 +231,7 @@ for iter = 1 :num_trials
         
         
         
-        fprintf('\nSimulation Time: %f [min]\nRun Time: %f [min]\n', sim_time/60, toc/60)
-        disp('_____________________________________________________')
+        fprintf('  Sim Time: %.2f [min]  Run Time: %.2f [min]\n', sim_time/60, toc/60)
         
         rAd = rAd.ResetIndex;
         
@@ -268,12 +262,23 @@ for ii = 1: numel(flds)
     rAd.Data.(flds{ii}).JointErr = err;
 end
 
-rAd = rAd.Eval_Stats;
-save(filepath, 'rAd')
+rAd = rAd.Eval_Stats('Time');
+save(filepath, 'coms_policy', 'rAd')
 
+fprintf('\nNumber of Communications\n')
+for ii = 1: num_auv
+    fprintf('AUV %d: %d\n',ii, sum(coms_policy(ii,:)))
+end
+
+% clear path
+% 
+% for ii = 1: num_auv
+%     path(ii) = {auv(1, ii).Paths.GT};
+% end
+% 
+% save(sprintf('/Users/jake/_OutPuts/Sim_Results/20200427_path_DR_%d.mat',num_auv), 'path')
 
 end
-%___________________________________________________________________________________________________
 
 
 
