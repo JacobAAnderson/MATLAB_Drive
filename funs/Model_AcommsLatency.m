@@ -6,6 +6,7 @@
 function [mu, sig] = Model_AcommsLatency( RT )
 
 dtfs = DateTime_Funs;                                                       % Date Time Functions
+disfmt = 'yyyy-MM-dd  HH:mm:ss.SSSSSS';
 
 fprintf('\n\nLatency in acoustic Communications:\n\n')
 
@@ -25,19 +26,21 @@ lon = NaN(sz(3),2);                                                         % Ve
 lon(1:sz(1),1) = v1(:,2);
 lon(1:sz(2),2) = v2(:,2);
 
-tx  = NaT(sz(3),2);
+tx  = NaT(sz(3),2, 'Format', disfmt);
 tx(1:sz(1),1) = cat(1,RT(1).rawAcomms.sent_msg);                            % Sent Messages
 tx(1:sz(2),2) = cat(1,RT(2).rawAcomms.sent_msg);
 
-rx  = NaT(sz(3),2);
+rx  = NaT(sz(3),2, 'Format', disfmt);
 rx(1:sz(1),1) = cat(1,RT(1).rawAcomms.recived_msg);                         % Sent Messages
 rx(1:sz(2),2) = cat(1,RT(2).rawAcomms.recived_msg);
 
-ts = NaT(sz(3),2);
+ts = NaT(sz(3),2, 'Format', disfmt);
 ts(1:sz(1),1) = cat(1,RT(1).rawAcomms.timeStamp);                           % Time Stamps
 ts(1:sz(2),2) = cat(1,RT(2).rawAcomms.timeStamp);
 
-
+tof = NaT(sz(3),2, 'Format', disfmt);
+tof(1:sz(1),1) = cat(1,RT(1).rawAcomms.tof);                                % Time of flight
+tof(1:sz(2),2) = cat(1,RT(2).rawAcomms.tof);
 
 a = numel(RT);
 
@@ -60,17 +63,16 @@ for a = [1:a; a:-1:1]
     
     
     % ---- Calculate One Way Time of Flight from time stamp ---------------
-    t_sent   = tx(tf,s);                                                    % Time message was sent, corrected for clock error
-    t_recive = ts(ind,r);                                                   % Time message was recived
+%     t_sent   = tx(tf,s);                                                    % Time message was sent, corrected for clock error
+%     t_recive = ts(ind,r);                                                   % Time message was recived
     
-    tof = t_recive - t_sent;                                                % One way time of flight
+    t_sent   = tof(tf,s);                                                   % Time message was sent, corrected for clock error
+    t_recive = tof(ind,r);                                                  % Time message was recived
     
-%     format = 'yyyy-MM-dd  HH:mm:ss.SSSSSS';
-%     ts.Format        = format;
-%     t_sent.Format    = format;
-%     t_recived.Format = format;
-%     tof.Format        = 'hh:mm:ss.SSSSSS';
-    
+    owtof = t_recive - t_sent;                                              % One way time of flight
+%     owtof(isnan(owtof)) = [];                                               % Get rid of NaTs
+%     owtof = owtof;
+        
     
     % ---- Calulate distance between vehicles and true time of flight -----
     d = vdist(lat(tf,s),lon(tf,s),lat(ind,r),lon(ind,r));                   % Distance between vehicles
@@ -78,19 +80,19 @@ for a = [1:a; a:-1:1]
     t = seconds(d/1475);                                                    % Time of flight based on speed of sound in water --> 1475 [m/s]
     
     
-    %% !!! Compare pAcomms TOF HERE !!!
-    pTOF = cat(1, RT(r).rawAcomms.tof);
-    pTOF = pTOF(ind,:);
+%     %% !!! Compare pAcomms TOF HERE !!!
+%     pTOF = cat(1, RT(r).rawAcomms.tof);
+%     pTOF = pTOF(ind,:);
     
     
     % ---- Calculate the acomms latency -----
-    err = t - tof;                                                          % Latency between sending the message and reciving the message
+    err = seconds(t - owtof);                                                          % Latency between sending the message and reciving the message
     
-    mu(s)  = mean(err);                                                     % Average latency
-    sig(s) = std(err);                                                      % Standard deviation in latency
+    mu(s)  = seconds( nanmean(err));                                                     % Average latency
+    sig(s) = seconds( nanstd(err));                                                      % Standard deviation in latency
 
     fprintf('Vehicle %s to %s\n', RT(s).name, RT(r).name)
-    fprintf('Ave: %f,\tSTD: %f\n',seconds(mu(s)), seconds(sig(s)))
+    fprintf('Ave: %s,\tSTD: %s\n',mu(s), sig(s))
     fprintf('Population: %d\n\n', size(set,1))
     
 end

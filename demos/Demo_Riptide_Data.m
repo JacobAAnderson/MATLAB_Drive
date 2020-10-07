@@ -10,7 +10,7 @@ clear all
 clc
 
 ui = SavedUserInputs(mfilename);                                            % Instantiate the Saved User Inputs Class
-ui = ui.NewData(false);                                                      % Indicate whether new data should be selescted by the user
+ui = ui.NewData(false);                                                     % Indicate whether new data should be selescted by the user
 
 
 % Get file with file path GUI ----------------------------------------------------------------------------------------------

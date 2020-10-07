@@ -1,6 +1,6 @@
 % Model Acoustic Modems
 % Jacob Anderson
-% RDML, OSU, Corvallis OR
+% RDML, OSU, Corvallis OR.
 % Sept 10, 2020
 
 close all
@@ -27,6 +27,7 @@ clc
 missions = [3,4];           % Fosters Lake Mission Set
 
 for v = 1: numel(RT)
+    
     RT(v) = RT(v).Select_Mission( missions(v) );                            % Choose Mission
     RT(v) = RT(v).Model_VehicleSpeed;                                       % Calculate corrected speed
     RT(v) = RT(v).Get_VehiclePaths;                                         % Evaluate GT and DR paths
@@ -37,6 +38,7 @@ for v = 1: numel(RT)
 end
 
 clear missions v
+
 
 
 
