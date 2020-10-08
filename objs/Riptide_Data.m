@@ -47,6 +47,38 @@ classdef Riptide_Data
         end
         
         
+        
+        function obj = Add_OWTOF(obj, owtof)
+            dtfs = DateTime_Funs;
+            
+            for tof = owtof
+                
+                msgs_tof = tof.msgs;
+                
+                for ii = 1: numel(obj.rawAcomms)
+                    
+                    for member = {'recived_msg', 'sent_msg'}
+                        
+                        msgs_rA = obj.rawAcomms(ii).(member{1});
+                        
+                        [Lia,Locb] = dtfs.Ismember(msgs_tof, msgs_rA);
+                        
+                        if ~any(Lia),continue, end
+                        
+                        Locb(Locb == 0) = [];
+                        
+                        dtfs.SetError(msgs_tof(Lia), msgs_rA(Locb))
+                        
+                        obj.rawAcomms(ii).tof(Locb,:) = tof.time(Lia);
+                        
+                    end
+                    
+                end
+            end
+            
+        end
+        
+        
         % Read in pAcommsHandler debug log
         function obj = Add_pAcommsHandler(obj, file)
             
@@ -73,6 +105,8 @@ classdef Riptide_Data
                 
                 msgs_pAcom = log.msg.msg;                                   % pAcomm messages
                 
+                fprintf("\tNumber of pAcommsHandler messages: %d\n", numel(msgs_pAcom))
+                
                 for ii = 1: numel(obj.rawAcomms)                            % Iterate through Acomms log data
                     
                     for member = {'recived_msg', 'sent_msg';
@@ -86,28 +120,21 @@ classdef Riptide_Data
                         
                         Locb(Locb == 0) = [];
                         
-                        if ~ dtfs.Isequal( msgs_pAcom(Lia), msgs_rA(Locb) )
-                            dt = msgs_pAcom(Lia)-msgs_rA(Locb);
-                            dt.Format = 's';
-                            fprintf("\n\tIndex error detected\n")
-                            disp(dt)
-                        end
+                        dtfs.SetError( msgs_pAcom(Lia), msgs_rA(Locb) )
                         
-                        tof = log.msg.(member{2})(Lia,:);
+                        obj.rawAcomms(ii).pAcomms_tof(Locb,:) = log.msg.(member{2})(Lia,:);
                         
-                        obj.rawAcomms(ii).tof(Locb,:) = tof;
                         
                         msgs_rA(isnat(msgs_rA)) = [];
                         
-                        fprintf("\tNumber of Acomms   Log   messages: %d\n", numel(msgs_rA))
-                        fprintf("\tNumber of pAcommsHandler messages: %d\n", numel(msgs_pAcom))
+                        fprintf("\tNumber of Acomms %s messages: %d\n", member{1}, numel(msgs_rA))
                         fprintf("\t%d of %d messages mached in %s\n", sum(Lia), numel(msgs_rA), obj.rawAcomms(ii).log)
+                        
                     end
                     
                 end
                 
             end
-            
             
         end
         
@@ -757,7 +784,7 @@ for mis = mis_unq'
     if is_Acomms
         for ii = 1:count
             
-            tof_ = isnat( tof(indx(ii,1) : indx(ii,2), :) );
+            tof_ = isnan( tof(indx(ii,1) : indx(ii,2), :) );
             tof_ = ~all(tof_(:));
             
             T(t_idx,:) = {mis{1} ,time_start(ii), time_end(ii), time_start(ii) + (time_end(ii) - time_start(ii))/2, tof_};

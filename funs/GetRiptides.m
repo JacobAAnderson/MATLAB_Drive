@@ -54,7 +54,7 @@ for ii = num:-1:1
     
     RT(ii) = RT(ii).Add_pAcommsHandler(path_pAcommsHand{ii});               % Add pAcommsHandler logs
     RT(ii) = RT(ii).Add_Waypoints(path_waypoints{ii});                      % Add mission waypoints
-    RT(ii) = RT(ii).Get_Manifest("skipidel","alt & acomms");                           % Create a table summerising the data and acomms logs, skip instances where the vehicle is idel and disply the table
+%     RT(ii) = RT(ii).Get_Manifest("skipidel","alt & acomms");                % Create a table summerising the data and acomms logs, skip instances where the vehicle is idel and disply the table
 
 end
 

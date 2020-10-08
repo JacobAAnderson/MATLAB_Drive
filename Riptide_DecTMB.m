@@ -14,66 +14,56 @@ clc
 ui = SavedUserInputs(mfilename);                                            % Instantiate the Saved User Inputs Class
 ui = ui.NewData(false);                                                      % Indicate whether new data should be selescted by the user
 
-[RT, geotiff, bathy] = GetRiptides(ui, 2, {'210','216'});                   % Choose data files with gui and return data structure
+sos = 1475;                                                                 % Speed of sound in water [m/s];
 
-dtfs = DateTime_Funs;                                                       % Date Time Functions
+filters = {'GPS_fix', 0;                                                   % Data filter {"Data_Field", value to be filterred out}
+           'ALT_ALTITUDE', 0};        
+
+[RT, geotiff, bathy] = GetRiptides(ui, 2, {'210','216'}, filters);          % Choose data files with gui and return data structure
 
 
-%% Prep Data
 
-% fig1 = bathy.Plot_3DModel(0, 90);                                           % Show the Bathymetry Map
+%% Sort Riptide_Acomms
+rtAcms = Riptide_Acomms;
 
-% ---- Initialization Sequence -----
+[~, sig, owtof] = rtAcms.Model_AcommsLatency( RT );                            % Model the latency in acoustic communications and get one way time of flight
 
-% missions = [3,2];         % Test Lake Mission Set
-missions = [1,3];           % Fosters Lake Mission Set
+for v = 1:numel(RT)
+    RT(v) = RT(v).Add_OWTOF(owtof);
+    RT(v) = RT(v).Get_Manifest("skipidel", "alt & acomms");
+end
+
+
+%% Select Mission
+% missions = [3,2];           % Test Lake Mission Set
+missions = [3,4];           % Fosters Lake Mission Set: test1, test2
+% missions = [4,5];           % Fosters Lake Mission Set: ZZ1, ZZ2
 
 for v = 1: numel(RT)
+    
     RT(v) = RT(v).Select_Mission( missions(v) );                            % Choose Mission
     RT(v) = RT(v).Model_VehicleSpeed;                                       % Calculate corrected speed
     RT(v) = RT(v).Get_VehiclePaths;                                         % Evaluate GT and DR paths
-    RT(v) = RT(v).Add_ParticleFilter(bathy);                                % Prep Particle filters
     
-%     fig1 = RT(v).pf.PlotState(fig1);                                        % Display Particle filter state
+    RT(v) = RT(v).Add_ParticleFilter(bathy);                                    % Prep Particle filters
+    RT(v).pf = RT(v).pf.SetNoise('acoms',  'Normal', 0, seconds(sig(v))*sos);   % Set acoustic modem error Distributions
+    RT(v).pf = RT(v).pf.SetNoise('compass','Normal', 0, 10);                    % Set compass error Distributions
+    
+    RT(v).Disp_Manifest;                                                    % Display Vehicle Manifest
     
 end
 
-clear missions v startime
+
+[~] = rtAcms.Plot_AcousticCommunications(RT, geotiff);                     % Plot Acoustic Communications
+
+clear missions v owtof filters sig
 
 RT_ = RT;                                                                   % Keep a clean coppy of the vehicle data
 
 
-% ---- Model the latency in acoustic communications ---
-[mu, sig] = Model_AcommsLatency( RT );
-
-
-% --- Show Acoustic Communications ---
-[~] = Plot_AcousticCommunications(RT, geotiff);
-
-% --- Show vehicle paths ---
-% fig1 = geotiff.Show;
-% 
-% for rt = RT
-%     fig1 = rt.Plot_Paths(fig1);
-%     fig1 = rt.Plot_Course(fig1);
-%     fig1 = rt.Plot_Acomms(fig1);
-% end
-
-% fig1 = RT(2).Plot_Path(fig1, 'DR', 'y');
-% fig1 = RT(2).Plot_Path(fig1, 'GT', 'w');
-% fig1 = RT(2).Plot_Course(fig1);
-
-
-
-
-
-
-
-
-
-return
 
 %% Do TBN
+dtfs = DateTime_Funs;                                                       % Date Time Functions
 
 % -- Fresh Start --
 close all   
@@ -86,7 +76,7 @@ timeLine = [RT(1).data.gpsDate;
             RT(2).data.gpsDate;
             RT(2).acomms.gpsDate];
 
-timeLine = sort(unique(timeLine));
+timeLine = sort(dtfs.Unique(timeLine));
 
 count = [0,0];
 
@@ -95,7 +85,7 @@ disp('Performing TBN')
 for time = timeLine'                                                        % Run the timeline
     for v = 1:numel(RT)                                                     % Switch between vehicles
         for mem = {'data','acomms'}                                         % Switch between data sources
-            for in = find(dtfs.Ismember(RT(v).(mem{1}).gpsDate, time))'          % Find which data it is time for
+            for in = find(dtfs.Ismember(RT(v).(mem{1}).gpsDate, time))'     % Find which data it is time for
                 
                 % ---- Process Navigation data ----
                 if strcmp(mem{1},'data')
@@ -122,17 +112,8 @@ for time = timeLine'                                                        % Ru
                     else, s = 1;
                     end
                     
-                    rx_msg  = RT(v).acomms.recived_msg(in);                 % Get the recived message
-                    
-                    idx = dtfs.Ismember(RT(s).acomms.sent_msg, rx_msg);          % Match it to the message sent from the other vehicle
-                    
-                    if ~any(idx), continue, end                             % Continue if there is not a matching sent message
-                    
-                    tx_time = RT(s).acomms.gpsDate(idx);
-                    rx_time = RT(v).acomms.gpsDate(in);
-                    owtof   = seconds(rx_time - tx_time);                   % Compute one way time of flight
-                    
-                    dist  = owtof * 1475;
+                    owtof = RT(v).acomms.tof(in);                           % One way time of flight
+                    dist  = seconds(owtof) * sos;                           % Compute Distance
                     x     = RT(s).pf.X(1:2)';
                     sig   = RT(s).pf.Cov(1:2,1:2);
                     acoms = {'Acoms', dist, x, sig};
@@ -172,7 +153,7 @@ clear time v mem in speed heading dt measurement s rx_msg rx_time tx_time owtof 
 
 
 
-%% ---- Calculate path errors and generate figures -----
+% ---- Calculate path errors and generate figures -----
 
 paths = {'DR_corrected', 'PF'};
 types = {'Error_210', 'Error_216', 'JointErr', 'Time'};
@@ -189,7 +170,7 @@ fprintf('\n\n\n')
 clear paths types type
 
 
-%% Display Specific Graphs
+% Display Specific Graphs
 fig1 = RT(1).Plot_Paths(geotiff);                                           % Plot lat-lon path on geotiff
 fig2 = RT(2).Plot_Paths(geotiff);                                           % Plot lat-lon path on geotiff
 

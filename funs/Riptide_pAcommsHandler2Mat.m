@@ -71,9 +71,9 @@ msgs = dtfns.Unique(msgs);
 Acomms.log         = f_name;
 Acomms.modemID     = str2double(modemID{3});
 Acomms.msg.msg     = msgs;
-Acomms.msg.rx_time = NaT(size(msgs,1), 3, 'Format', disfmt);
-Acomms.msg.tx_time = NaT(size(msgs,1), 3, 'Format', disfmt);
-Acomms.msg.tof     = NaT(size(msgs,1), 3, 'Format', disfmt);
+Acomms.msg.rx_time = NaT(size(msgs,1), 4, 'Format', disfmt);
+Acomms.msg.tx_time = NaT(size(msgs,1), 4, 'Format', disfmt);
+Acomms.msg.tof     = NaT(size(msgs,1), 4, 'Format', disfmt);
 
 
 % ____ Find Interesting info ____

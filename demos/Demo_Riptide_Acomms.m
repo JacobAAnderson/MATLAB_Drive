@@ -21,10 +21,28 @@ filters = {'GPS_fix', 0};                                                   % Da
 RT_ = RT;                                                                   % Keep a clean coppy of the vehicle data
 
 
-%% Prep Data
+
+%% Riptide_Acomms
+
+rtAcms = Riptide_Acomms;
+
+[~,~, owtof] = rtAcms.Model_AcommsLatency( RT );                            % Model the latency in acoustic communications and get one way time of flight
+
+%%
+for v = 1:numel(RT)
+    RT(v) = RT(v).Add_OWTOF(owtof);
+    RT(v) = RT(v).Get_Manifest("skipidel"); %, "alt & acomms");
+    RT(v).Disp_Manifest; 
+end
+
+
+
+%% Plot Acomms for a particular mission
+close all
 clc
-% missions = [3,2];         % Test Lake Mission Set
-missions = [3,4];           % Fosters Lake Mission Set
+% missions = [3,2];           % Test Lake Mission Set
+% missions = [3,4];           % Fosters Lake Mission Set: test1, test2
+missions = [4,5];           % Fosters Lake Mission Set: ZZ1, ZZ2
 
 for v = 1: numel(RT)
     
@@ -37,18 +55,9 @@ for v = 1: numel(RT)
     
 end
 
-clear missions v
+clear missions v owtof rtAcms filters
 
-
-
-
-%% ---- Model the latency in acoustic communications ---
-[mu, sig] = Model_AcommsLatency( RT );
-
-
-
-%% --- Show Acoustic Communications ---
-[~] = Plot_AcousticCommunications(RT, geotiff);
+fig1 = rtAcms.Plot_AcousticCommunications(RT, geotiff);                     % Plot Acoustic Communications
 
 
 

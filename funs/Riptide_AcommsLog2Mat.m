@@ -97,7 +97,12 @@ Data.sent_type    = sent_typ;
 Data.src_dest     = src_dest';
 Data.recived_msg  = recive_msg';
 Data.recived_type = recive_typ;
-Data.tof          = NaT(numel(rawData.Mission),3, 'Format', format);
 
+Data.pAcomms_tof  = NaT(numel(rawData.Mission),4, 'Format', format);
+
+Data.tof          = seconds( NaN(numel(rawData.Mission),1) );
 end
+
+
+
 
