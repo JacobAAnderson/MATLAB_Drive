@@ -60,7 +60,7 @@ for ii = 1: numel(dataArray)
 end
 
 
-% ---- Data filters Data by GPS fix ----------------
+% ---- Apply Data filters ----------------
 in = true(L,1);
 if nargin == 2
     for filter = filters'
@@ -68,7 +68,7 @@ if nargin == 2
         tf = strcmp(Names, filter{1});
         
         if any(tf)
-            in(dataArray{tf} == filter{2} )   = false;
+            in(dataArray{tf} == filter{2} ) = false;
         end
         
     end
@@ -85,8 +85,14 @@ for ii = 1:numel(Names)
     rawData.(Names{ii}) = data(in);                                         % Assign data to struc using variable names as fields
 end
 
-rawData.DEPTH = zeros(sum(in),1);                                           % Depth data is currently not availalbe
 
+rawData.DEPTH = zeros(sum(in),1);                                       % Depth data is currently not availalbe
+
+% if isfield(rawData, 'PS_BAD_PRESSURE')
+%     rawData.DEPTH = [rawData.PS_BAD_PRESSURE{:}] * 1;                                      % Figure Out depth from hydrostatic pressure
+% else
+%     rawData.DEPTH = zeros(sum(in),1);                                       % Depth data is currently not availalbe
+% end
 
 
 % -----Get the mission names seperated from the paths ---------------------
@@ -100,20 +106,47 @@ mission(tf) = {'idel'};
 if isfield(rawData, 'RT_THRUST_SPEED')                                      % Speed data is available for Data logs but not all Acomms
     speed = rawData.('RT_THRUST_SPEED');
     
-    tf2 = speed == 0;
-    mission(tf2) = {'idel'};                                            % If Speed is 0, then the vehicle is idel
+    tf2 = speed == 0 | isnan(speed);
+    mission(tf2) = {'idel'};                                                % If Speed is 0 or NaN, then the vehicle is idel
     
     tf = tf | tf2;
 end
 
-
-for ii = numel(mission): -1: 1
-    
+for ii = numel(mission): -1: 1 
     if ~tf(ii)                                    
-        parts = strsplit(mission{ii}, '/');                           % Get Mission name out of text string
+        parts = strsplit(mission{ii}, '/');                                 % Get Mission name out of text string
         mission{ii} = parts{5};
     end
 end
+
+
+% --- Correct for false idels due to short thruster drop outs ----
+tf_last = tf(1);
+to_count = false;
+count = 0;
+for ii = 1:numel(tf)
+    
+    if ~tf_last && tf(ii)                                                   % Change from named mission to idel
+        to_count = true;
+        
+    elseif tf_last && ~tf(ii)                                               % Change from idel to named mission
+        to_count = false;
+        
+        if count < 30 && strcmp(mission(ii), mission(ii - count -1))        % Vehicle was idel for less than 30 seco
+            mission(ii-count:ii) = mission(ii);
+            fprintf('\tCorrecting Mission Name: %s\n', mission{ii} )
+        end
+        
+        count = 0;
+    end
+    
+    if to_count
+        count = count + 1;
+    end
+    
+    tf_last = tf(ii);
+end
+
 
 rawData.('Mission') = mission;
 
@@ -229,10 +262,11 @@ for ii = 1:numel(header)
             
         case 'RT_THRUST_SPEED', f = '%f';
             
-        case 'ALT_TRIGGER',     f = '%d';
-        case 'ALT_PING_RATE',   f = '%d';
-        case 'ALT_SOUND_SPEED', f = '%d';
-        case 'ALT_ALTITUDE',    f = '%f';
+        case 'ALT_TRIGGER',           f = '%d';
+        case 'ALT_PING_RATE',         f = '%d';
+        case 'ALT_SOUND_SPEED',       f = '%d';
+        case 'ALT_ALTITUDE',          f = '%f';
+        case 'ALT_ALTITUDE_Origonal', f = '%f';
         
         case 'MODEM_ID',	    f = '%d';
         case 'ACOMMS_XMIT',	    f = '%s';

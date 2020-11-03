@@ -75,6 +75,10 @@ Acomms.msg.rx_time = NaT(size(msgs,1), 4, 'Format', disfmt);
 Acomms.msg.tx_time = NaT(size(msgs,1), 4, 'Format', disfmt);
 Acomms.msg.tof     = NaT(size(msgs,1), 4, 'Format', disfmt);
 
+if isempty(msgs)
+    fprintf("\tNo Acomms messages found\n")
+    return
+end
 
 % ____ Find Interesting info ____
 in = ... strncmp( Data, ': D: $CARXP', 11) | ...                                % The modem sends this message when it acoustically detects the start of a packet.

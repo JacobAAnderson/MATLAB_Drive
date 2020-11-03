@@ -8,12 +8,13 @@ classdef Riptide_Data
     properties
         acomms
         course
+        commsPlanner
         data
         filteredData
         manifest
         name
         path
-        pf
+        tbn
         rawAcomms
         rawCourse
         rawData
@@ -24,9 +25,9 @@ classdef Riptide_Data
     methods
         
         % Instanciate Class by loading Raw Data
-        function obj = Riptide_Data(file, name_, varargin), warning on backtrace
+        function obj = Riptide_Data(file, offset_file, name_, varargin), warning on backtrace
             
-            fun = @(file_) Riptide_DataLog2Mat(file_, varargin{:});
+            fun = @(file_) Riptide_DataLog2Mat(file_, offset_file, varargin{:});
             obj.rawData = GetData(file, fun, 'csv');
             obj.data = obj.rawData;
             
@@ -150,25 +151,31 @@ classdef Riptide_Data
         
         
         % Provide the vehicle with a particle filter for Terrain Based Navigation annalisys
-        function obj = Add_ParticleFilter(obj, map, noise)
+        function obj = Add_TBN(obj, map)
             
-            obj.pf = ParticleFilter(obj.name, 1000 );                       % Instanciate Paricle Filter
+            obj.tbn = DEC_TBN(obj.name, 1000 );                              % Instanciate Paricle Filter
             
-            obj.pf = obj.pf.Add_Map(map);                                   % Provide Bathymetry map
-            obj.pf = obj.pf.SetLocation(obj.path.GT.utm(1,:), [3,0;0,3]);   % Tell it where the vehicle is starting from
+            obj.tbn = obj.tbn.Add_Map(map);                                   % Provide Bathymetry map
+            obj.tbn = obj.tbn.SetLocation(obj.path.GT.utm(1,:), [3,0;0,3]);   % Tell it where the vehicle is starting from
             
-            if nargin == 3  % Set Specific Uncertainty values                                                 
-                prop = noise(1);
-                dist = noise(2);
-                mu   = noise(3);
-                sig  = noise(4);
-                obj.pf = obj.pf.SetNoise(obj, prop, dist, mu, sig);
-                
-            else    % Set Default Uncertainty Values
-                obj.pf = obj.pf.SetNoise('speed',  'Normal', 0, 1.0);       % Set vehicle transiton model as a probability distribuition ( "type of distribuition' , mu, sigma )
-                obj.pf = obj.pf.SetNoise('compass','Normal', 0, 10);        % Set Comapss Noise
-                obj.pf = obj.pf.SetNoise('alt',    'Normal', 0, 0.5);       % Set Sensor model as a probability distribuition ( "type of distribuition' , mu, sigma )
-                obj.pf = obj.pf.SetNoise('acoms',  'Normal', 0, 0.5);       % Set Sensor model as a probability distribuition ( "type of distribuition' , mu, sigma )
+ 
+            % --- Set vehicle transiton model as a probability distribuition ( "type of distribuition' , mu, sigma ) ---
+            for prop = {'acoms',  'altimeter', 'compass' 'speed';           % --> Type of noise
+                        'Normal', 'Normal',    'Normal', 'Normal';          % --> Default distribion type
+                         0,        0,           0,        0;                % --> Default mu
+                         0.5,      0.5,         10,       1.0}              % --> Default sigma
+                     
+                     
+                     if  isfield( obj.vehicleModel, prop{1} )
+                         mu     = obj.vehicleModel.(prop{1}).mu;
+                         sig    = obj.vehicleModel.(prop{1}).sigma;
+                         name_  = obj.vehicleModel.(prop{1}).DistributionName;
+                         obj.tbn = obj.tbn.SetNoise(prop{1}, name_, mu, sig);
+                         
+                     else
+                         obj.tbn = obj.tbn.SetNoise(prop{1}, prop{2}, prop{3}, prop{4});
+                     end
+                     
             end
             
         end
@@ -191,69 +198,67 @@ classdef Riptide_Data
             
             obj.path = [];
             
-            for ii = 1: size(obj.data,2)
-                
-                speed     = obj.data(ii).attitude(:,5);
-                heading   = obj.data(ii).attitude(:,3);
-                timestamp = obj.data(ii).timeStamp;
-                
-                timeStep_ = [0; seconds(timestamp(2:end) - timestamp(1: end-1))];
-                
-                deltaX_dr = speed .* timeStep_ .* sind( heading );
-                deltaY_dr = speed .* timeStep_ .* cosd( heading );
-                
-                x = cumsum(deltaX_dr);
-                y = cumsum(deltaY_dr);
-                
-                [xx, yy, utmzone] = deg2utm( obj.data(ii).vehicle(:,1), obj.data(ii).vehicle(:,2) );
-                
-                [dr_lat, dr_lon] = utm2deg(x + xx(1), y+yy(1), utmzone);
-                
-                obj.path(ii).GT.lat_lon = obj.data(ii).vehicle(:,1:2);
-                obj.path(ii).GT.utm     = [xx,yy];
-                obj.path(ii).GT.utmzone = utmzone;
-                
-                obj.path(ii).DR.utm(:,1) = x + xx(1);
-                obj.path(ii).DR.utm(:,2) = y + yy(1);
-                obj.path(ii).DR.lat_lon  = [dr_lat, dr_lon];
-                
-                obj.data.timeStep = timeStep_;
-                
-                if isfield( obj.vehicleModel, 'speed')
-                    
-                    speed(speed > 0) = obj.vehicleModel.speed.mu;
-                    
-                    deltaX_dr = speed .* timeStep_ .* sind( heading );
-                    deltaY_dr = speed .* timeStep_ .* cosd( heading );
-                    
-                    x = cumsum(deltaX_dr);
-                    y = cumsum(deltaY_dr);
-                    
-                    [xx, yy, utmzone] = deg2utm( obj.data(ii).vehicle(:,1), obj.data(ii).vehicle(:,2) );
-                    
-                    [dr_lat, dr_lon] = utm2deg(x + xx(1), y+yy(1), utmzone);
-                    
-                    obj.path(ii).DR_corrected.utm(:,1) = x + xx(1);
-                    obj.path(ii).DR_corrected.utm(:,2) = y + yy(1);
-                    obj.path(ii).DR_corrected.lat_lon  = [dr_lat, dr_lon];
-                end
-                
-            end
+            speed     = obj.data(1).attitude(:,5);
+            heading   = obj.data(1).attitude(:,3);
+            timestamp = obj.data(1).timeStamp;
+            
+            timeStep_ = [0; seconds(timestamp(2:end) - timestamp(1: end-1))];
+            
+            deltaX_dr = speed .* timeStep_ .* sind( heading );
+            deltaY_dr = speed .* timeStep_ .* cosd( heading );
+            
+            x = cumsum(deltaX_dr);
+            y = cumsum(deltaY_dr);
+            
+            [xx, yy, utmzone] = deg2utm( obj.data(1).vehicle(:,1), obj.data(1).vehicle(:,2) );
+            
+            [dr_lat, dr_lon] = utm2deg(x + xx(1), y+yy(1), utmzone);
+            
+            obj.path.GT.lat_lon = obj.data(1).vehicle(:,1:2);
+            obj.path.GT.utm     = [xx,yy];
+            obj.path.GT.utmzone = utmzone;
+            
+            obj.path.DR.utm(:,1) = x + xx(1);
+            obj.path.DR.utm(:,2) = y + yy(1);
+            obj.path.DR.lat_lon  = [dr_lat, dr_lon];
+            
+            obj.data.timeStep = timeStep_;
+            
+            if ~ ( isfield( obj.vehicleModel, 'speed') || isfield( obj.filteredData, 'heading') ), return, end
+            
+            if isfield( obj.vehicleModel, 'speed'),   speed   = obj.filteredData.speed;   end
+            if isfield( obj.filteredData, 'heading'), heading = obj.filteredData.heading; end
+            
+            deltaX_dr = speed .* timeStep_ .* sind( heading );
+            deltaY_dr = speed .* timeStep_ .* cosd( heading );
+            
+            x = cumsum(deltaX_dr);
+            y = cumsum(deltaY_dr);
+            
+            [xx, yy, utmzone] = deg2utm( obj.data(1).vehicle(:,1), obj.data(1).vehicle(:,2) );
+            
+            [dr_lat, dr_lon] = utm2deg(x + xx(1), y+yy(1), utmzone);
+            
+            obj.path.DR_corrected.utm(:,1) = x + xx(1);
+            obj.path.DR_corrected.utm(:,2) = y + yy(1);
+            obj.path.DR_corrected.lat_lon  = [dr_lat, dr_lon];
+            
+            
             
         end
         
         
         % Retrive the path recorded by the particle filter
-        function obj = Get_PFpath(obj)
+        function obj = Get_TBNpath(obj)
             
-            utm = obj.pf.path(1:obj.pf.path_idx-1,1:2);
+            utm = obj.tbn.path(1:obj.tbn.path_idx-1,1:2);
             
-            zone = obj.pf.Map.UTM_Zone;
+            zone = obj.tbn.Map.UTM_Zone;
             
             [lat, lon]  = utm2deg( utm(:,1), utm(:,2), repmat(zone, size(utm,1),1 )) ;
             
-            obj.path.PF.utm = utm;
-            obj.path.PF.lat_lon = [lat, lon];
+            obj.path.tbn.utm = utm;
+            obj.path.tbn.lat_lon = [lat, lon];
         end
         
         
@@ -302,9 +307,9 @@ classdef Riptide_Data
             
             in = false(size(T_a,1),1);
             
-            sz = [100,6];
-            varTypes = {'string', 'datetime',  'datetime', 'string', 'datetime',  'logical'};
-            varNames = {'Mission','Start Time','End Time', 'Type',   'Mid-Point', 'Has TOF'};
+            sz = [100,7];
+            varTypes = {'string', 'datetime',  'datetime', 'string', 'datetime',  'logical', 'single'};
+            varNames = {'Mission','Start Time','End Time', 'Type',   'Mid-Point', 'Has TOF', '#'};
             
             T = table('Size',sz,'VariableTypes',varTypes,'VariableNames',varNames);
             
@@ -329,7 +334,7 @@ classdef Riptide_Data
                 
                 
                 if ~alt_acoms || (alt_acoms && type == "Alt & Acomms")
-                    T(count,:) = {miss, T_d.('Start Time')(indx), T_d.('End Time')(indx), type, time, hasTOF};
+                    T(count,:) = {miss, T_d.('Start Time')(indx), T_d.('End Time')(indx), type, time, hasTOF, count};
                     count = count + 1;
                 end
             end
@@ -337,14 +342,19 @@ classdef Riptide_Data
             % Collect the Acomms Logs that are not associated with a data log
             if ~alt_acoms
                 for in = find(~in)'
-                    T(count,:) = {T_a.Mission(in), T_a.('Start Time')(in), T_a.('End Time')(in), "Acomms", T_a.('Mid-Point')(in), T_a.('Has TOF')(in)};
+                    T(count,:) = {T_a.Mission(in), T_a.('Start Time')(in), T_a.('End Time')(in), "Acomms", T_a.('Mid-Point')(in), T_a.('Has TOF')(in), count};
                     count = count + 1;
                 end
             end
             
             T(count:end,:) = [];
             
+            % -- Table Formatting --
+            T = [T(:,2), T(:,1), T(:,3:end)];                % Sord by Date
             T = sortrows(T);
+            
+            T.('#') = (1:count-1)';                         % Add column to indicate mission number
+            T = [T(:,end), T(:,2), T(:,1), T(:,3:end-1)];   % Return table to origonal varialbe order but with missiton number first
             
             obj.manifest = T;
             
@@ -384,28 +394,156 @@ classdef Riptide_Data
             
             speed(speed > 0) = mu;
             
-            obj.vehicleModel.speed = makedist('Normal','mu',mu,'sigma',sig);
-            obj.filteredData.speed = speed;
-            obj.data.timeStep      = timestep;
+            obj.vehicleModel.speed       = makedist('Normal', 'mu', 0, 'sigma', sig);
+            obj.vehicleModel.units.speed = "m/s";
+            obj.filteredData.speed       = speed;
+            obj.data.timeStep            = timestep;
         end
         
         
         % Calculate the altimiter Noise
-        function obj = Model_Altimiter(obj)
+        function obj = Model_Altimiter(obj, threshold)
             
-            altitude = obj.data(1).attitude(:,4);
-            speed    = obj.data(1).attitude(:,5);
+            alt = obj.data(1).attitude(:,4);
             
-            out = speed == 0;
-            altitude(out)  = [];
+%             mu  = mean(alt);
+%             sig = std(alt);
             
-            mu  = mean(altitude);
-            sig = std(altitude);
+            % --- Filter Altimiter Data ----
+            if nargin == 2
+                alt(alt > threshold) = 0;
+            end
             
-            obj.vehicleModel.altimiter = makedist('Normal','mu',mu,'sigma',sig);
+            alt(alt < 0) = 0;
+            alt1 = alt;
+             
+            A = 1;              % Process Model
+            B = 1;              % Control Model
+            C = 1;              % Observation Matrix
+            
+            Q = 1;            % Uncertainty in the process model
+            R =std(alt);        % Measurment Standard Deviation
+            
+            u = 0;              % Control input
+            
+            sw = SlidingWindow(20, numel(alt));                             % Slididng window ojbect
+            
+            for c = 1:2
+                
+                x = alt(1);         % State
+                sig = 0.75;         % Error in the state
+                
+                for ii = 2:numel(alt)
+                    
+                    rows = sw.D1(ii);
+                    window = alt(rows);
+                    oo = window == 0;
+                    
+                    if sum(oo) > 12, alt1(ii) = 0; continue %, end
+                        
+                    elseif alt(ii) == 0, z = mean(window(window ~= 0));
+                    else,            z = alt(ii);
+                    end
+                    
+                    %                 z = alt(ii);
+                    
+                    [x, sig] = Kalman_Filter(x, sig, u, z, A, B, C, Q, R);
+                    
+                    alt1(ii) = x;
+                end
+                
+                alt = alt1;
+            end
+            
+            obj.vehicleModel.altimeter = makedist('Normal','mu', 0,'sigma',0.75);
+            obj.vehicleModel.units.altimeter = "m";
+            obj.filteredData.altitude = alt1;
             
         end
         
+        
+        % Create model of the compass
+        function obj = Model_Compass(obj, modelType, plotIO)
+            
+            compass = obj.data(1).attitude(:,3);                            % Comapss heading
+            
+            gps0 = obj.path.GT.utm;                                         % Get Vehicle Location
+            gps1 = zeros(size(gps0));
+            
+            % Smooth out the GPS data to determin the true vehicle heading
+            n = size(gps0,1);
+            sw = SlidingWindow(20, n);
+            
+            for ii = 1:n
+                
+                data_ = gps0(sw.D1(ii),:);
+                gps1(ii,:) = mean(data_);
+                
+            end
+            
+            % Determin the true vehicl;e heading
+            dxdy = zeros(size(gps1));
+            dxdy(1:end-1,:) = gps1(2:end, :) - gps1(1:end-1,:);
+            dxdy(end,:) = dxdy(end-1,:);
+            
+            oo = dxdy(:,1) == 0 & dxdy(:,2) == 0;
+            
+            angle = NaN(size(compass));
+            angle(~oo) = atan2(dxdy(~oo,2), dxdy(~oo,1)) * 180/pi;          % Deturmine true heading
+            
+            neg = angle < 0;                                                % Keep angles between 0 and 360
+            angle(neg) = angle(neg) + 360; 
+
+            angle = CompassAngle(angle, 'deg', 'deg');                      % Conver to compass angle
+
+            
+            % Get Compass Error and compensate for rolle over
+            err = angle - compass;                                          % Compass Error
+
+            for ii = find( abs(err) > 180)'
+                
+                if angle(ii) > 180
+                    angle(ii) = angle(ii) - 360;
+                else
+                    angle(ii) = angle(ii) + 360;
+                    
+                end
+            end
+                    
+            err = angle - compass;                                          % Compass Error
+ 
+            angle(isnan(angle)) = compass(isnan(angle));
+            
+            sig = nanstd(err);
+            
+            obj.vehicleModel.compass = makedist('Normal','mu', 0,'sigma',sig);
+            obj.vehicleModel.units.compass = 'deg';
+            
+            c = compass(~isnan(angle));
+            a = angle(~isnan(angle));
+            
+            f = fit( c, a, modelType);            
+            
+            y = feval(f,compass);
+            
+            obj.filteredData.heading = y;
+            
+            
+            if nargin == 3 && plotIO
+            figure('name', sprintf("Compass Calibration for %s",obj.name), 'numbertitle', 'off');
+            p1 = plot(angle, 'g');
+            hold on
+            p2 = plot(compass, 'b');
+            p3 = plot(err, 'r');
+            p4 = plot(y, 'm');
+            hold off
+            
+            legend([p1,p2,p3,p4], {'gps','compass','errer','fit'})
+            end
+            
+        end
+            
+            
         
         % Select data from an indivual mission
         function obj = Select_Mission(obj, idx)
@@ -417,6 +555,10 @@ classdef Riptide_Data
             obj.data   = obj.rawData;
             obj.acomms = obj.rawAcomms;
             obj.course = obj.rawCourse;
+            
+            % Get Rid of old models
+            obj.filteredData = [];
+            obj.vehicleModel = [];
             
             mission    = obj.manifest.Mission(idx);
             start_time = obj.manifest.('Start Time')(idx);
@@ -461,6 +603,9 @@ classdef Riptide_Data
                 end
             end
             
+            
+            obj.filteredData = [];                                          % Get Rid of filtered Data
+        
         end
         
         
@@ -470,13 +615,13 @@ classdef Riptide_Data
             
             
             if nargin > 1 && isa(fig_, 'Geotiff')
-                fig = figure('name', 'Riptide Pathes', 'numbertitle', 'off');
+                fig = figure('name', sprintf('Riptide %s Pathes', obj.name), 'numbertitle', 'off');
                 geoshow(fig_.Image, fig_.Data)
                 
             elseif nargin > 1 && isgraphics(fig_, 'figure')
                 fig = figure(fig_);
             else
-                fig = figure('name', 'Riptides Pathes', 'numbertitle', 'off');
+                fig = figure('name', sprintf('Riptide %s Pathes', obj.name), 'numbertitle', 'off');
             end
             
             mem = fields(obj.path(1));
@@ -496,24 +641,25 @@ classdef Riptide_Data
             
             hold off
             
-            title('Riptide Paths')
+            title(sprintf("Riptide %s's Pathes", obj.name))
             xlabel('Easitng')
             ylabel('Northing')
             legend([p, p1, p2] ,[mem; {'Start'; 'End'}], 'Interpreter', 'non')
             
+            drawnow
         end
         
         
         function fig = Plot_Path(obj, fig_, path, c)
             
             if nargin > 1 && isa(fig_, 'Geotiff')
-                fig = figure('name', 'Riptide Pathes', 'numbertitle', 'off');
+                fig = figure('name', sprintf('Riptide %s Pathes', obj.name), 'numbertitle', 'off');
                 geoshow(fig_.Image, fig_.Data)
                 
             elseif nargin > 1 && isgraphics(fig_, 'figure')
                 fig = figure(fig_);
             else
-                fig = figure('name', 'Riptides Pathes', 'numbertitle', 'off');
+                fig = figure('name', sprintf('Riptide %s Pathes', obj.name), 'numbertitle', 'off');
             end
             
             if nargin < 4, c = 'g'; end
@@ -528,20 +674,20 @@ classdef Riptide_Data
             plot(obj.path(ii).(path).lat_lon(end,2), obj.path(ii).(path).lat_lon(end,1), ['o',c]);
             
             hold off
-            
+            drawnow
         end
         
         
         function fig = Plot_Course(obj, fig_)
             
             if nargin > 1 && isa(fig_, 'Geotiff')
-                fig = figure('name', 'Riptides Pathes', 'numbertitle', 'off');
+                fig = figure('name', sprintf('Riptide %s Pathes', obj.name), 'numbertitle', 'off');
                 geoshow(fig_.Image, fig_.Data)
                 
             elseif nargin > 1 && isgraphics(fig_, 'figure')
                 fig = figure(fig_);
             else
-                fig = figure('name', 'Riptides Pathes', 'numbertitle', 'off');
+                fig = figure('name', sprintf('Riptide %s Pathes', obj.name), 'numbertitle', 'off');
             end
             
             waypoints = obj.course.waypoints;
@@ -555,24 +701,80 @@ classdef Riptide_Data
             fig.CurrentAxes.Legend.String = str;
             
             hold off
-            
+            drawnow
         end
         
         
         function fig = Plot_Acomms(obj, fig_)
             
             if nargin > 1 && isa(fig_, 'Geotiff')
-                fig = figure('name', 'Riptide Pathes', 'numbertitle', 'off');
+                fig = figure('name', sprintf('Riptide %s Pathes', obj.name), 'numbertitle', 'off');
                 geoshow(fig_.Image, fig_.Data)
                 
             elseif nargin > 1 && isgraphics(fig_, 'figure')
                 fig = figure(fig_);
             else
-                fig = figure('name', 'Riptides Pathes', 'numbertitle', 'off');
+                fig = figure('name', sprintf('Riptide %s Pathes', obj.name), 'numbertitle', 'off');
             end
             
             hold on
             plot(obj.acomms.vehicle(:,2), obj.acomms.vehicle(:,1), '*')
+            hold off
+            drawnow
+        end
+        
+        
+        function fig = Plot_Altitude(obj, fig)
+            
+            times = obj.data.timeStamp;
+            
+            if isfield(obj.filteredData, 'altitude')
+                alt = obj.filteredData.altitude;
+            else
+                alt = obj.data(1).attitude(:,4);
+            end
+            
+            if nargin == 2
+                figure(fig)
+                hold on
+            else
+                fig = figure('name',sprintf('%s Altimeter Measurments',obj.name), 'numbertitle', 'off');
+            end
+            
+            if numel(times) == numel(alt)
+                plot(times, alt)
+            else
+                warning("Plot_Altitude --> Times and Alt are different sizes")
+                plot(alt)
+            end
+            
+            title(sprintf('%s: Atitude vs Time', obj.name), 'FontSize', 14)
+            xlabel('Date-Time', 'FontSize', 14)
+            ylabel('Atitude [m]', 'FontSize', 14)
+            drawnow
+            legend('FontSize', 12)
+        end
+        
+        
+        function fig = Plot_Alt_Geotiff(obj, geotiff)
+            
+            if isfield(obj.filteredData, 'altitude')
+                alt = obj.filteredData.altitude;
+            else
+                alt = obj.data(1).attitude(:,4);
+            end
+            
+            oo = alt == 0;
+            
+            lat_lon = obj.path.GT.lat_lon;
+            
+            fig = figure('name',sprintf("%s Altimeter", obj.name), 'numbertitle', 'off');
+            geotiff.Show
+            hold on
+            
+            plot(lat_lon(oo,2), lat_lon(oo,1), 'r.')        % Plot 0s
+            plot(lat_lon(~oo,2), lat_lon(~oo,1), 'g.')      % Plot ~0s
+            
             hold off
             
         end
@@ -604,13 +806,14 @@ classdef Riptide_Data
         end
         
         
-        function fig = Show_TimeStamps(obj)
+        function fig = Plot_TimeStamps(obj)
             
             times = obj.data.timeStamp;
             
             fig = figure('name','Mission Timestamps','numbertitle','off');
             plot(times)
             
+            drawnow
         end
             
                
