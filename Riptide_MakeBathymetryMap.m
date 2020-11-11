@@ -28,17 +28,18 @@ if isempty(paths.Lutra), return, end
 
 
 % --- Get Data From Riptides ---
-filters = {'GPS_fix', 0;                                                    % Data filter {"Data_Field", value to be filterred out}
-           'ALT_ALTITUDE', 0};  
+filters = {'GPS_fix', 0};                                                    % Data filter {"Data_Field", value to be filterred out}
+%           'ALT_ALTITUDE', 0};  
 
 RT = Riptide_Data(paths.rt, paths.offset, '21x', filters);                  % Read in Riptide Files
 rt_bathy = cat(1, RT.rawData.bathymetry);
 
-% [alt, idx] = FilterRawAltimeter(rt_bathy(:,3), 16);                         % Filter Altimiter Data
-% rt_bathy = [rt_bathy(idx,1:2), -alt];
 
-rt_bathy(:,3) = -rt_bathy(:,3);                                             % Invert depth measurments
+[alt, idx] = FilterRawAltimeter(rt_bathy(:,3), 16);                         % Filter Altimiter Data
+rt_bathy = [rt_bathy(idx,1:2), -alt(idx)];
 
+
+% rt_bathy(:,3) = -rt_bathy(:,3);                                             % Invert depth measurments
 
 
 % --- Get Data From Lutra ---- 
@@ -56,26 +57,36 @@ data = [data; rt_bathy];                                                    % Co
 
 % --- clean Up the data ----
 out = any(isnan(data),2) | ...
+      any(isinf(data),2) | ...
       data(:,3) == 0     | ...
       data(:,3) > 16;
       
 
-  data(out,:) = [];
+data(out,:) = [];
 
 % perimiter = csvread(file4);
 % in = inpolygon(data(:,1), data(:,2), perimiter(:,2), perimiter(:,1)); 
 % data = data(in,:);
 
 
-% Make the Bathymetry Map
+clear file1 file2 filePath tmp data1 data2 data3 rt_data rt_bathy lu_data
+
+
+
+%% Make the Bathymetry Map
 bathy_map = Bathymetry_Map;                                                 % Instanciate bathymetry map
 bathy_map = bathy_map.MakeMap(data);                                        % Make Bathymetry map from rando data
+
+bathy_map.PlotMap(geotiff);
+
+bathy_map = bathy_map.MapSmoothing;
+
+bathy_map.PlotMap(geotiff);
 
 % Make Bathymetry map with GP Regresstion --> still being developed
 % bathy_gp = Bathymetry_Map;
 % bathy_gp = bathy_gp.MakeMap_GP(data, perimiter);
 
-clear file1 file2 filePath tmp data1 data2 data3 rt_data rt_bathy
 
 
 
@@ -113,11 +124,11 @@ if nargin == 2
     idx(alt > threshold) = true;
 end
 
-idx(alt < 0) = true;
+idx(alt >= 0)   = true;
 idx(isnan(alt)) = true;
 idx(isinf(alt)) = true;
 
-alt(idx) = [];
+alt(idx) = 0;
 
 if nargout == 2
     idx = ~idx;

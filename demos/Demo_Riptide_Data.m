@@ -67,12 +67,13 @@ fig1 = RT.Plot_Paths(geotiff);                                              % Sh
 
 
 %% Model / Calibrate Altimiter Data
-fig = RT.Plot_Altitude;                                                     % Show Altimeter profile
+fig = RT.Plot_AltimeterProfile;                                             % Show Altimeter profile
 
 RT = RT.Model_Altimiter(20);                                                % Filter Altimiter data and build normal distribution
-[~] = RT.Plot_Altitude(fig);                                                % Show Altimeter profile
 
-% [~] = RT.Plot_Alt_Geotiff(geotiff);                                         % Show Altimeter location on map
+RT.Plot_AltimeterProfile(fig);                                              % Show Altimeter profile
+
+% RT.Plot_Altimeter(geotiff);                                         % Show Altimeter location on map
     
 
 

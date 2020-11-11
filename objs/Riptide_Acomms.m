@@ -124,7 +124,7 @@ classdef Riptide_Acomms
                     OWTOF(s).msgs = tx(tf,s);
                     OWTOF(s).mu   = mu(s);
                     OWTOF(s).sig  = sig(s);
-                    
+                    OWTOF(s).gt   = d;
                     OWTOF(s).time.Format = 's';
                 end
             end
@@ -135,7 +135,7 @@ classdef Riptide_Acomms
         
         
         
-        function [mu, sig] = Mission_Latency(~, RT )
+        function [mu, sig, d] = Mission_Latency(~, RT )
             
             dtfs = DateTime_Funs;                                           % Date Time Functions
             disfmt = 'yyyy-MM-dd  HH:mm:ss.SSSSSS';
@@ -166,15 +166,11 @@ classdef Riptide_Acomms
             rx(1:sz(1),1) = cat(1,RT(1).acomms.recived_msg);                % Sent Messages
             rx(1:sz(2),2) = cat(1,RT(2).acomms.recived_msg);
             
-            % ts = NaT(sz(3),2, 'Format', disfmt);
-            % ts(1:sz(1),1) = cat(1,RT(1).rawAcomms.timeStamp);             % Time Stamps
-            % ts(1:sz(2),2) = cat(1,RT(2).rawAcomms.timeStamp);
-            
             tof(1).t = NaT(sz(3),4, 'Format', disfmt);
             tof(2).t = NaT(sz(3),4, 'Format', disfmt);
             tof(1).t(1:sz(1),:) = cat(1,RT(1).acomms.pAcomms_tof);          % Time of flight
             tof(2).t(1:sz(2),:) = cat(1,RT(2).acomms.pAcomms_tof);
-            
+                       
             a = numel(RT);
             
             mu(a)  = seconds;
@@ -248,7 +244,7 @@ classdef Riptide_Acomms
         
         
         
-        function fig = Plot_AcousticCommunications(~, RT, geotiff)
+        function figOut = Plot_AcousticCommunications(~, RT, geotiff)
             
             dtfs = DateTime_Funs;
             
@@ -282,6 +278,7 @@ classdef Riptide_Acomms
             
             dtfs.SetError(set(:,1), set(:,2))
             
+            
             % --- Plot ---
             fig = figure('Name',"Acomms Map", 'numbertitle','off');
             
@@ -289,8 +286,11 @@ classdef Riptide_Acomms
             
             hold on
             
+            % Plot vehicle GPS tracks
             p1 = plot(path1(:,2), path1(:,1), 'y');
             p2 = plot(path2(:,2), path2(:,1), 'b');
+            
+            % Plot Acoustic Communications sites
             plot(lon1, lat1, '*y')
             plot(lon2, lat2, '*b')
             
@@ -302,13 +302,8 @@ classdef Riptide_Acomms
                 
             end
             
-            
-            
+                        
             % Plot Communications from vehicle B to A
-            d_lat = lat1(Loca) - lat2(Lib);
-            d_lon = lon1(Loca) - lon2(Lib);
-            quiver( lon2(Lib), lat2(Lib), d_lon, d_lat, 1)
-            
             for arr = [lon2(Lib)'; lat2(Lib)'; zeros(size(lon2(Lib)))'; lon1(Loca)'; lat1(Loca)'; zeros(size(lon1(Loca)))']
                 
                 farrow( arr(1), arr(2), arr(3), arr(4), arr(5), arr(6), 'c', 1 );
@@ -318,6 +313,13 @@ classdef Riptide_Acomms
             hold off
             
             legend([p1,p2], {name1, name2})
+            
+            drawnow
+            
+            if nargout == 1
+                figOut = fig;
+            end
+            
             
         end
         

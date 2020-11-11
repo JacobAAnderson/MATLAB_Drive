@@ -13,6 +13,7 @@ dtfs   = DateTime_Funs;                                                     % Da
 rtAcms = Riptide_Acomms;                                                    % Joint Riptide functions
 sos    = 1475;                                                              % Speed of sound in water [m/s];
 
+timeLine_mission = [];                                                      % Keep track of which time line we have
 
 
 %% Get Data
@@ -36,215 +37,285 @@ for v = 1:numel(RT)
     RT(v).commsPlanner = CommunicationPlanning(RT(v).name);
 end
 
+disp('Saving Riptide Data')
+save("/Users/jake/_OutPuts/RT_FostersLake.mat", 'RT', 'geotiff', 'bathy')
+
+clear owtof filters
 
 
-%% ____ Select Mission ____
+
+%% Select Mission
 close all
 clc
 
+load('/Users/jake/_OutPuts/RT_FostersLake.mat')
+
+% ------ 2020-09-21 ----------------
 % missions = [ 1, 1];         % Fosters Lake Mission Set: CurcumNav1, CircumNav2
 % missions = [ 2, 2];         % Fosters Lake Mission Set: CurcumNav1, CircumNav2        --> Good Acoms
 % missions = [ 3, 3];         % Fosters Lake Mission Set: Dimond1_A, Dimond1_B          --> Decent Acomms
+
+% ------ 2020-10-09 ----------------
 % missions = [ 5, 7];         % Fosters Lake Mission Set: test1, test2
 % missions = [ 7, 8];         % Fosters Lake Mission Set: ZZ1, ZZ2
 % missions = [ 8, 9];         % Fosters Lake Mission Set: ZZ1, ZZ2
 % missions = [ 9,10];         % Fosters Lake Mission Set: ZZ3_A, ZZ3_B                  --> Decent Acoms
 % missions = [10,11];         % Fosters Lake Mission Set: ZZ3_A, ZZ3_B                  --> Decent Acomms
-% missions = [11,12];         % Fosters Lake Mission Set:CircumNav2_B, CircumNave2_A    --> Decent Acomms
- missions = [14,15];         % Fosters Lake Mission Set:ZZ1, ZZ2                         --> Decent Acomms
+
+% ------ 2020-10-27 ----------------
+ missions = [11,12];         % Fosters Lake Mission Set:CircumNav2_B, CircumNave2_A    --> Decent Acomms
+% missions = [14,15];         % Fosters Lake Mission Set:ZZ1, ZZ2                         --> Decent Acomms
 % missions = [15,16];         % Fosters Lake Mission Set:Dimond1_A, Dimond1_B  (DEC-TBN Does better)
+% missions = [16,17];         % Fosters Lake Mission Set:ZZ4_B, ZZ4_A  
 
-fig1 = geotiff.Show;
 
-for v = 1: numel(RT)
+
+% fig1 = geotiff.Show;                                                      % Show geotiff for plotting paths
+
+for ii = [1: numel(RT); numel(RT):-1:1], v = ii(1); s = ii(2);
     
+    % -- Select mission --
     RT(v) = RT(v).Select_Mission( missions(v) );                            % Choose Mission
     RT(v) = RT(v).Get_VehiclePaths;                                         % Evaluate GT and DR paths for speed and compass modeling
+    
+    % -- Terrain Based Navigation stuff --
+    RT(v) = RT(v).Add_TBN(bathy);                                           % Prep Particle filters
     RT(v) = RT(v).Model_VehicleSpeed;                                       % Calculate corrected speed from GPS
     RT(v) = RT(v).Model_Compass('poly2');                                   % Model / Calibrate Compass data
-    RT(v) = RT(v).Model_Altimiter(20);                                      % Filter Altimiter data and build normal distribution
-    RT(v) = RT(v).Get_VehiclePaths;                                         % Evaluate GT and DR paths
-    RT(v) = RT(v).Add_TBN(bathy);                                           % Prep Particle filters
-        
-    RT(v).Disp_Manifest;                                                    % Display Vehicle Manifest
+    RT(v) = RT(v).Model_Altimiter(true);                                    % Filter Altimiter data and build normal distribution
+    RT(v) = RT(v).Get_VehiclePaths;                                         % Evaluate GT and Corrected DR paths from the speed and compass models
     
-    %___ Plot Stuff ____
-    fig1 = RT(v).Plot_Paths(fig1);                                          % Show paths on a geotiff
-%     [~] = RT(v).Plot_Altitude;                                              % Show Altimeter profile
-%     [~] = RT(v).Plot_Alt_Geotiff(geotiff);                                  % Show Altimeter location on map
+    
+    % -- Communication planning stuff --
+    RT(v) = RT(v).Add_CommsPlanner;
+    
+    RT(v).commsPlanner = RT(v).commsPlanner.Add_Vehicle(RT(v).VehicleInfo('self'));
+    RT(v).commsPlanner = RT(v).commsPlanner.Add_Vehicle(RT(s).VehicleInfo);
+   
+    
+    
+    % -- Plot/display Stuff --
+    RT(v).Disp_Manifest;                                                    % Display Vehicle Manifest
+%     fig1 = RT(v).Plot_Paths(fig1);                                        % Show paths on a geotiff
+%     RT(v).Plot_AltimeterProfile;                                          % Show Altimeter profile
+%     RT(v).Plot_Altimeter(geotiff);                                        % Show Altimeter location on map
 
 end
 
 
-% --- Get Acoustic modem model for the selected mission ---
-[mu, sig] = rtAcms.Mission_Latency(RT);                                      
+[mu, sig] = rtAcms.Mission_Latency(RT);                                     % Get Acoustic modem model for the selected mission
+                                   
 
-% - Set Acomms Noise Distributions -
-for v = 1:numel(RT)
+for v = 1:numel(RT)                                                         % Set Acomms Noise Distributions 
     m = seconds(mu(v));
     s = seconds(sig(v))*sos;
-    RT(v).tbn = RT(v).tbn.SetNoise('acoms',  'Normal', m, s);                 % Set acoustic modem error Distributions
+    RT(v).tbn = RT(v).tbn.SetNoise('acoms',  'Normal', m, s * 1.5);         % Set acoustic modem error Distributions
 end
 
+rtAcms.Plot_AcousticCommunications(RT, geotiff);                            % Plot Acoustic Communications
 
-[~] = rtAcms.Plot_AcousticCommunications(RT, geotiff);                      % Plot Acoustic Communications
+clear v m s
 
-clear missions v owtof filters sig m s
-
-RT_ = RT;                                                                   % Keep a clean coppy of the vehicle data
-
+RT_ = RT;                                                                   % Keep a clean copy of RT
 
 
-%% ---- Get Timeline -----
+% ---- Get Timeline -----
 disp("--- Getting Time Line ---")
 tic
-timeLine = [RT(1).data.gpsDate;
-            RT(1).acomms.gpsDate;
-            RT(2).data.gpsDate;
-            RT(2).acomms.gpsDate];
 
-timeLine = sort(dtfs.Unique(timeLine));
-fprintf("Time Line finished\nElapsed time: %.1f [sec]\n\n", toc)
+if ~isequal( timeLine_mission, missions)
+    
+    timeLine_mission = missions;
+    timeLine = [RT(1).data.gpsDate;
+        RT(1).acomms.gpsDate;
+        RT(2).data.gpsDate;
+        RT(2).acomms.gpsDate];
+    
+    timeLine = sort(dtfs.Unique(timeLine));
+    fprintf("Time Line finished\nElapsed time: %.1f [sec]\n\n", toc)
+end
 
-
-%% ____ Do TBN ____
-
-% -- Fresh Start --
-% clc
+% _____ Do TBN _____________________
+clc
 close all
-clear RT time v mem in speed heading dt measurement s rx_msg rx_time tx_time owtof dist x sig acoms rt idx fig1 fig2
+
+num_trials = 1;
+
+% --- Instanciate rAd to track data ---
+paths = {'DR_Correctd', 'DEC_TBN', 'TBN'};                                  % Set up rAd with DR corrected data
+types = {'Dory_Error', 'Nemo_Error', 'Joint_Error', 'Time'};
+
+[rAd, gtPaths] = GetRAD(RT, paths, types, num_trials, timeLine);            % Create rAd with DR Correctd data entered
+
 RT = RT_;
 
 
-count = [0,0];
+for prop = { 'altimeter', 'compass' 'speed';           % --> Type of noise
+             'Normal',    'Normal', 'Normal';          % --> Default distribion type
+              0,           0,        0;                % --> Default mu
+              2.5,         30,       2.0;              % --> Sigma for Dory
+              2.5,         30,       2.0}              % --> Sigma for Nemo
+    
 
-% ---- Run through data logs doing TBN -----
-disp('==== Performing TBN ====')
-for time = timeLine'                                                        % Run the timeline
-    for v = 1:numel(RT)                                                     % Switch between vehicles
-        for mem = {'data'}%,'acomms'}                                       % Switch between data sources
-            for in = find(dtfs.Ismember(RT(v).(mem{1}).gpsDate, time))'     % Find which data it is time for
+        RT(1).tbn = RT(1).tbn.SetNoise(prop{1}, prop{2}, prop{3}, prop{4});
+        RT(2).tbn = RT(2).tbn.SetNoise(prop{1}, prop{2}, prop{3}, prop{5});
+
+end
+
+
+
+% --- TBN Simulation ---
+for dec_tbn = [false, true]                                                 % Switch between TBN and DEC-TBN
+    for iter = 1: num_trials
+        
+        [tbnPaths, sim_times] = Riptide_TBN_Sim(RT, timeLine, sos, mu, dec_tbn);    % Do TBN / DEC-TBN simulation
+        
+        rAd = TallyPathData(rAd, iter, paths(2:3), gtPaths, tbnPaths, sim_times, timeLine, dec_tbn);     % Calculate path errors and add to rAd
+        
+        
+        if iter == num_trials
+            
+            for v = 1: numel(RT)
                 
-                % ---- Process Navigation data ----
-                if strcmp(mem{1},'data')
-                    
-                    % --- Particle Filter Update ---
-                    speed   =  RT(v).filteredData.speed(in);                 % Use the updated speed 
-                    heading =  RT(v).data.attitude(in,3);
-                    dt      =  RT(v).data.timeStep(in);
-                    alt     = -RT(v).filteredData.altitude(in);
-                    
-%                     fprintf("[%s]  TBN - Update, speed: %f, heading: %f, dt: %f", RT(v).name, speed, heading, dt) 
-                    
-%                     disp(" ")
-%                     RT(v).tbn = RT(v).tbn.Update(speed, dt, heading);
-                    
-                    if alt == 0
-%                         fprintf('\n')
-                        RT(v).tbn = RT(v).tbn.Update(speed, dt, heading);
-                    else
-%                         fprintf(', alt: %f\n', alt)
-                        RT(v).tbn = RT(v).tbn.Update(speed, dt, heading, alt);
-                    end
-%                     count(v) = count(v) + 1;
-                    
+                if dec_tbn
+                    RT(v) = RT(v).Add_Path(tbnPaths(:,:,v), "DEC_TBN", 'utm');
+                else        
+                    RT(v) = RT(v).Add_Path(tbnPaths(:,:,v), "TBN",     'utm');
                 end
-                
-                
-                
-                % ---- Process Recived Acomms messages ----
-                if false strcmp(mem{1},'acomms') && ~isnat(RT(v).acomms.recived_msg(in))
-                    
-                    if v == 1, s=2;                                         % Get index of the vehicle that sent the message
-                    else, s = 1;
-                    end
-                    
-                    owtof = RT(v).acomms.tof(in) - mu(v);                   % One way time of flight
-                    dist  = seconds(owtof) * sos;                           % Compute Distance
-                    x     = RT(s).tbn.X(1:2)';
-                    sig   = RT(s).tbn.cov(1:2,1:2);
-%                     acoms = {'Acoms', dist, x, sig};
-                    
-                    fprintf("[%s]  TBN - Acomms, owtof: %1.8s, dist: %5.2f [m]\n",RT(v).name, owtof, dist) 
-                    
-                    RT(v).tbn = RT(v).tbn.Acoms(dist, x, sig);
-                    count(v) = count(v) + 1;
-                    
-                end
-                
                 
             end
         end
+          
     end
 end
 
-disp(count)
 
-% ____ Post Processing ____
-for v = 1: numel(RT)
-    RT(v) = RT(v).Get_TBNpath;                                               % Copy over TBN path to RT and conver to lat_lon 
-end
+rAd = rAd.Eval_Stats('Time');                                               % Determine average error and total error
 
-
-% % ____ Display results ____
-% fig1 = bathy.Plot_3DModel(0, 90);                                           % Show the Bathymetry Map
-% fig2 = geotiff.Show;                                                        % Show Geotiff
-% 
-% for rt = RT
-%     
-%     fig1 = rt.tbn.PlotPath(fig1);                                            % Plot utm path on bathymetry map
-%     fig2 = rt.Plot_Paths(fig2);                                             % Plot lat-lon path on geotiff
-%     
-% end
-
-
-clear time v mem in speed heading dt measurement s rx_msg rx_time tx_time owtof dist x sig acoms rt idx
-
-
-
-% ---- Calculate path errors and generate figures -----
-
-paths = {'DR_corrected', 'tbn'};
-types = {'Error_210', 'Error_216', 'JointErr', 'Time'};
-
-rAd = ExtractPathData(RT, paths, types);
-
-
-% _____ Display Results __________________________________________________
-for type = types(1:3), rAd.PlotData( paths, type{1}, 'Time'), end
-
-fprintf('\n\n\n')
-fprintf("Total Joint Error for Dead Reckoning:  %.2f [m s]\n", rAd.Stats.DR_corrected.JointErr.Area_Ave)
-fprintf("Total Joint Error for Particle Filter: %.2f [m s]\n", rAd.Stats.tbn.JointErr.Area_Ave)
-fprintf('\n\n\n')
+DisplyRAD(rAd, types, paths)                                                % Display Result Stats
 
 
 % ____ Display Specific Graphs ___________________________________________
-fig1 = RT(1).Plot_Paths(geotiff);                                           % Plot lat-lon path on geotiff
-fig2 = RT(2).Plot_Paths(geotiff);                                           % Plot lat-lon path on geotiff
-
-
-
-%% Functions
-
-function rAd = ExtractPathData(RT, paths, types)
-
-num   = min(size(RT(1).path.GT.lat_lon,1), size(RT(2).path.GT.lat_lon,1));
-
-rAd = RandomAssData([num,1], paths, types);                                 % Instanciate RandomAssData
-
-for sim = paths
+for v = 1:numel(RT)
     
-    err1 = abs( RT(1).path.(sim{1}).utm(1:num,:) - RT(1).path.GT.utm(1:num,:) );
-    err2 = abs( RT(2).path.(sim{1}).utm(1:num,:) - RT(2).path.GT.utm(1:num,:) );
-    jointErr = err1 + err2;
+    RT(v).Plot_Paths(geotiff, {'GT', 'DR_corrected', 'TBN', 'DEC_TBN'});                                             % Plot lat-lon path on geotiff
+   
+end
+
+
+
+
+
+%% ========= Functions ==============
+
+
+%% Create rAd and out put GT paths for later err calculations
+function [rAd, gtPaths] = GetRAD(RT, paths, types, num_trials, timeLine)
+
+num = max( arrayfun( @(x) size( x.path.GT.utm, 1), RT));
+rAd = RandomAssData([num,num_trials], paths, types);
+
+gtPaths = zeros(num,2,numel(RT));
+
+for v = 1: numel(RT)
     
-    for time = 1:num
-        rAd = rAd.Add_Result(1, sim{1}, err1(time), err2(time), jointErr(time), time); % Add data to the respective set
+    sz = size( RT(v).path.GT.utm, 1);
+    gtPaths(1:sz,:,v) = RT(v).path.GT.utm;
+    
+end
+
+
+drPaths = zeros(num,2,numel(RT));
+drTimes = NaT(num, numel(RT));
+
+for v = 1: numel(RT)
+    
+    sz = size( RT(v).path.GT.utm, 1);
+    drPaths(1:sz,:,v) = RT(v).path.DR_corrected.utm;
+    
+    drTimes(1:sz,v) = RT(v).data.gpsDate;
+    
+    
+end
+
+rAd = TallyPathData(rAd, 1, paths(1), gtPaths, drPaths, drTimes, timeLine, true);
+
+
+end
+
+
+
+
+%% Add Path data to rAd 
+function rAd = TallyPathData(rAd, iter, paths, gtPaths, tbnPaths, times, t, dec_tbn)
+
+if dec_tbn, path = paths(1);
+else,       path = paths(2);
+end
+
+s = size(gtPaths,3);
+
+err = NaN(size(t,1), s + 1 );
+
+
+
+for ii = 1: size(t,1)
+    
+    for v = 1:s
+        
+        idx = find( ismember(times(:,v), t(ii)) );
+        
+        if any(idx)
+            
+            err(ii,v) = vecnorm( gtPaths(idx(1),1:2, v) - tbnPaths(idx(1),1:2, v), 2, 2);
+            
+            
+        end
+        
+    end
+    
+end
+
+
+for v = 1: s
+    for ii = find(isnan(err(:,v)))'
+        
+        if ii == 1, continue, end
+        
+        err(ii,v) = err(ii-1,v);
+        
     end
 end
 
-rAd = rAd.Eval_Stats('Time');
+
+err(:,end) = nansum(err, 2);
+
+for ii = 1:size(err,1)
+    rAd = rAd.Add_Result(iter, path{1}, err(ii,1), err(ii,2), err(ii,3), t(ii) ); % Add data to the respective set
+end
+
+
+rAd = rAd.ResetIndex;
+
 
 end
+
+
+
+%% Display rAd stats
+function DisplyRAD(rAd, types, paths)
+
+%for t = types(1:3), rAd.PlotData( paths, t{1}, 'Time'), end
+for t = types(1:3), rAd.PlotStat( paths, 'Ave', t{1}, 'Time'), end
+
+
+fprintf('\n\n\n')
+fprintf("Total Joint Error for DR Cor.:  %.2f [m s]\n", rAd.Stats.DR_Correctd.Joint_Error.Area_Ave)
+fprintf("Total Joint Error for DEC-TBN:  %.2f [m s]\n", rAd.Stats.DEC_TBN.Joint_Error.Area_Ave)
+fprintf("Total Joint Error for TBN:      %.2f [m s]\n", rAd.Stats.TBN.Joint_Error.Area_Ave)
+fprintf('\n\n\n')
+
+end
+
+
 

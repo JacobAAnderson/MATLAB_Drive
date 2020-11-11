@@ -13,13 +13,14 @@ classdef Riptide_Data
         filteredData
         manifest
         name
+        orical
         path
-        tbn
+        pAcommsHandler        
         rawAcomms
         rawCourse
         rawData
+        tbn
         vehicleModel
-        pAcommsHandler
     end
     
     methods
@@ -48,6 +49,12 @@ classdef Riptide_Data
         end
         
         
+        function obj = Add_CommsPlanner(obj)
+            
+            obj.commsPlanner = CommunicationPlanning(obj.name);
+            
+        end
+        
         
         function obj = Add_OWTOF(obj, owtof)
             dtfs = DateTime_Funs;
@@ -71,7 +78,7 @@ classdef Riptide_Data
                         dtfs.SetError(msgs_tof(Lia), msgs_rA(Locb))
                         
                         obj.rawAcomms(ii).tof(Locb,:) = tof.time(Lia);
-                        
+                        obj.rawAcomms(ii).gt(Locb,:) = tof.gt(Lia);
                     end
                     
                 end
@@ -140,6 +147,45 @@ classdef Riptide_Data
         end
         
         
+        % Add TBN and other patths
+        function obj = Add_Path(obj, path_, type, coord_syst)
+            
+            path_( any(isnan(path_), 2), :) = [];
+            path_( any(path_ == 0,   2), :) = [];
+            
+            
+            switch lower(coord_syst)
+                
+                case {'lat-lon', 'latlon'}
+                    
+                    lat = path_(:,1);
+                    lon = path_(:,2);
+                    
+                    [xx, yy] = deg2utm(lat , lon);
+                    
+                    
+                case 'utm'
+                    
+                    xx = path_(:,1);
+                    yy = path_(:,2);
+                    
+                    utmzone = obj.path.GT.utmzone;
+                    utmzone = repmat(utmzone(1,:), size(xx) );
+                    
+                    [lat, lon] = utm2deg(xx, yy, utmzone);
+                    
+                    
+                otherwise
+                    warning('Un-reckognized coordinate system')
+                    
+            end
+            
+            obj.path.(type).lat_lon = [lat, lon];
+            obj.path.(type).utm     = [xx,yy];
+            
+        end
+        
+        
         % Read in mission files to get the waypoints
         function obj = Add_Waypoints(obj, file)
             
@@ -163,7 +209,7 @@ classdef Riptide_Data
             for prop = {'acoms',  'altimeter', 'compass' 'speed';           % --> Type of noise
                         'Normal', 'Normal',    'Normal', 'Normal';          % --> Default distribion type
                          0,        0,           0,        0;                % --> Default mu
-                         0.5,      0.5,         10,       1.0}              % --> Default sigma
+                         0.5,      2.5,         30,       2.0}              % --> Default sigma
                      
                      
                      if  isfield( obj.vehicleModel, prop{1} )
@@ -177,6 +223,14 @@ classdef Riptide_Data
                      end
                      
             end
+           
+            % Create perfect altimiter profile for testing
+            
+            gt = obj.path.GT.utm;
+            
+            obj.orical.alt = map.Depth(gt);
+            
+            
             
         end
         
@@ -192,6 +246,63 @@ classdef Riptide_Data
             
         end
       
+
+        % Kalman filter altimiter data
+        function alt1 = Filter_Altimiter(obj, threshold)
+            
+            alt = obj.data(1).attitude(:,4);
+            
+%             mu  = mean(alt);
+%             sig = std(alt);
+            
+            % --- Filter Altimiter Data ----
+            if nargin == 2
+                alt(alt > threshold) = 0;
+            end
+            
+            alt(alt < 0) = 0;
+            alt1 = alt;
+            
+            A = 1;              % Process Model
+            B = 1;              % Control Model
+            C = 1;              % Observation Matrix
+            
+            Q = 1;              % Uncertainty in the process model
+            R =std(alt);        % Measurment Standard Deviation
+            
+            u = 0;              % Control input
+            
+            sw = SlidingWindow(20, numel(alt));                             % Slididng window ojbect
+            
+            for c = 1:2
+                
+                x = alt(1);         % State
+                sig = 0.75;         % Error in the state
+                
+                for ii = 2:numel(alt)
+                    
+                    rows = sw.D1(ii);
+                    window = alt(rows);
+                    oo = window == 0;
+                    
+                    if sum(oo) > 12, alt1(ii) = 0; continue %, end
+                        
+                    elseif alt(ii) == 0, z = mean(window(window ~= 0));
+                    else,            z = alt(ii);
+                    end
+                    
+                    %                 z = alt(ii);
+                    
+                    [x, sig] = Kalman_Filter(x, sig, u, z, A, B, C, Q, R);
+                    
+                    alt1(ii) = x;
+                end
+                
+                alt = alt1;
+            end
+            
+        end
+        
         
         % Get Vehicle Path in UTM an degrees lat-lon
         function obj = Get_VehiclePaths(obj)
@@ -249,7 +360,7 @@ classdef Riptide_Data
         
         
         % Retrive the path recorded by the particle filter
-        function obj = Get_TBNpath(obj)
+        function obj = Get_TBNpath(obj, type)
             
             utm = obj.tbn.path(1:obj.tbn.path_idx-1,1:2);
             
@@ -257,8 +368,16 @@ classdef Riptide_Data
             
             [lat, lon]  = utm2deg( utm(:,1), utm(:,2), repmat(zone, size(utm,1),1 )) ;
             
-            obj.path.tbn.utm = utm;
-            obj.path.tbn.lat_lon = [lat, lon];
+            if nargin < 2
+                obj.path.tbn.utm = utm;
+                obj.path.tbn.lat_lon = [lat, lon];
+                
+            else
+                obj.path.(type).utm = utm;
+                obj.path.(type).lat_lon = [lat, lon];
+                
+            end
+            
         end
         
         
@@ -394,7 +513,7 @@ classdef Riptide_Data
             
             speed(speed > 0) = mu;
             
-            obj.vehicleModel.speed       = makedist('Normal', 'mu', 0, 'sigma', sig);
+            obj.vehicleModel.speed       = makedist('Normal', 'mu', 0, 'sigma', 0.5);
             obj.vehicleModel.units.speed = "m/s";
             obj.filteredData.speed       = speed;
             obj.data.timeStep            = timestep;
@@ -402,62 +521,55 @@ classdef Riptide_Data
         
         
         % Calculate the altimiter Noise
-        function obj = Model_Altimiter(obj, threshold)
+        function obj = Model_Altimiter(obj, plotIO)
+            
+            mapAlt = obj.orical.alt;
             
             alt = obj.data(1).attitude(:,4);
             
-%             mu  = mean(alt);
-%             sig = std(alt);
-            
-            % --- Filter Altimiter Data ----
-            if nargin == 2
-                alt(alt > threshold) = 0;
+            if size(alt) ~= size(mapAlt)
+                warning('Altimiter profile and bathymetric profile are diferent sizes')
             end
             
-            alt(alt < 0) = 0;
-            alt1 = alt;
-             
-            A = 1;              % Process Model
-            B = 1;              % Control Model
-            C = 1;              % Observation Matrix
             
-            Q = 1;            % Uncertainty in the process model
-            R =std(alt);        % Measurment Standard Deviation
+            out = alt > max(mapAlt(:)) | ...
+                  alt < min(mapAlt(:)) | ...
+                  alt == 0;
             
-            u = 0;              % Control input
+            alt(out) = nan;
+            
             
             sw = SlidingWindow(20, numel(alt));                             % Slididng window ojbect
             
-            for c = 1:2
+            for ii = 1:numel(alt)
                 
-                x = alt(1);         % State
-                sig = 0.75;         % Error in the state
+                rows = sw.D1(ii);
                 
-                for ii = 2:numel(alt)
-                    
-                    rows = sw.D1(ii);
-                    window = alt(rows);
-                    oo = window == 0;
-                    
-                    if sum(oo) > 12, alt1(ii) = 0; continue %, end
-                        
-                    elseif alt(ii) == 0, z = mean(window(window ~= 0));
-                    else,            z = alt(ii);
-                    end
-                    
-                    %                 z = alt(ii);
-                    
-                    [x, sig] = Kalman_Filter(x, sig, u, z, A, B, C, Q, R);
-                    
-                    alt1(ii) = x;
-                end
+                alt(ii) = nanmean([alt(rows);mapAlt(rows)]);
                 
-                alt = alt1;
             end
             
-            obj.vehicleModel.altimeter = makedist('Normal','mu', 0,'sigma',0.75);
+            alt(out) = 0;
+            
+            sig = nanstd(alt);
+            
+            obj.vehicleModel.altimeter = makedist('Normal','mu', 0,'sigma',sig * 2);
             obj.vehicleModel.units.altimeter = "m";
-            obj.filteredData.altitude = alt1;
+            obj.filteredData.altitude = alt;
+            
+            
+            if nargin == 2 && plotIO
+                figure('name', sprintf('%s Altimiter Profiles', obj.name))
+                p1 = plot(alt);
+                hold on
+                p2 = plot(mapAlt);
+                hold off
+                
+                xlabel('Time Step')
+                ylabel('Altitude [m]')
+                title( sprintf('%s Altimiter Profile', obj.name) )
+                legend([p1,p2], {'Filtered Altimiter', 'Bathymetry Profile'} )
+            end
             
         end
         
@@ -514,9 +626,10 @@ classdef Riptide_Data
  
             angle(isnan(angle)) = compass(isnan(angle));
             
+            mu = nanmean(err);
             sig = nanstd(err);
             
-            obj.vehicleModel.compass = makedist('Normal','mu', 0,'sigma',sig);
+            obj.vehicleModel.compass = makedist('Normal','mu', mu,'sigma',20);
             obj.vehicleModel.units.compass = 'deg';
             
             c = compass(~isnan(angle));
@@ -530,15 +643,19 @@ classdef Riptide_Data
             
             
             if nargin == 3 && plotIO
-            figure('name', sprintf("Compass Calibration for %s",obj.name), 'numbertitle', 'off');
-            p1 = plot(angle, 'g');
-            hold on
-            p2 = plot(compass, 'b');
-            p3 = plot(err, 'r');
-            p4 = plot(y, 'm');
-            hold off
-            
-            legend([p1,p2,p3,p4], {'gps','compass','errer','fit'})
+                figure('name', sprintf("Compass Calibration for %s",obj.name), 'numbertitle', 'off');
+                p1 = plot(angle, 'g');
+                hold on
+                p2 = plot(compass, 'b');
+                p3 = plot(err, 'r');
+                p4 = plot(y, 'm');
+                hold off
+                
+                xlabel('Time Steps', 'FontSize', 14)
+                ylabel('Compass Heading [deg]', 'FontSize', 14)
+                title(sprintf("Compass Calibration for %s",obj.name), 'FontSize', 14)
+                legend([p1,p2,p3,p4], {'gps','compass','errer','fit'}, 'FontSize', 12)
+                drawnow
             end
             
         end
@@ -610,24 +727,53 @@ classdef Riptide_Data
         
         
         
+        function [pf, path, name_, r, speed, speedNoise, compassNoise] = VehicleInfo(obj, name_)
+            
+            if nargin == 1
+                name_ = obj.name;
+            end
+            
+            pf = obj.tbn;
+            r  = 3;
+            
+            speed = obj.filteredData.speed(1);
+            
+            speedNoise   = obj.vehicleModel.speed.sigma;
+            compassNoise = obj.vehicleModel.compass.sigma;
+            
+            path = obj.course.waypoints;
+            
+            trueStart = obj.path.GT.utm(1,:);
+            
+            
+            
+        end
+        
+        
+        
         % _____ Plotting __________________________________________________________________________
-        function fig = Plot_Paths(obj, fig_)
+        function figOut = Plot_Paths(obj, fig_, paths, c)
             
             
             if nargin > 1 && isa(fig_, 'Geotiff')
-                fig = figure('name', sprintf('Riptide %s Pathes', obj.name), 'numbertitle', 'off');
-                geoshow(fig_.Image, fig_.Data)
+                fig = figure('name', sprintf('Riptide %s Paths', obj.name), 'numbertitle', 'off');
+                fig_.Show
                 
             elseif nargin > 1 && isgraphics(fig_, 'figure')
                 fig = figure(fig_);
             else
-                fig = figure('name', sprintf('Riptide %s Pathes', obj.name), 'numbertitle', 'off');
+                fig = figure('name', sprintf('Riptide %s Paths', obj.name), 'numbertitle', 'off');
             end
             
-            mem = fields(obj.path(1));
+            
+            if nargin < 3, mem = fields(obj.path(1));
+            else,          mem = paths';
+            end
+            
+            if nargin < 4, c = 'grbcm'; end
             
             hold on
-            c = 'grbcm';
+            
             
             for ii = numel(mem): -1: 1
                 
@@ -641,25 +787,30 @@ classdef Riptide_Data
             
             hold off
             
-            title(sprintf("Riptide %s's Pathes", obj.name))
-            xlabel('Easitng')
-            ylabel('Northing')
-            legend([p, p1, p2] ,[mem; {'Start'; 'End'}], 'Interpreter', 'non')
+            title(sprintf("Riptide %s's Paths", obj.name), 'FontSize', 14)
+            xlabel('Easitng', 'FontSize', 14)
+            ylabel('Northing', 'FontSize', 14)
+            legend([p, p1, p2] ,[mem; {'Start'; 'End'}], 'Interpreter', 'non', 'FontSize', 12)
             
             drawnow
+            
+            if nargout == 1
+                figOut = fig;
+            end
+            
         end
         
         
-        function fig = Plot_Path(obj, fig_, path, c)
+        function figOut = Plot_Path(obj, fig_, path, c)
             
             if nargin > 1 && isa(fig_, 'Geotiff')
-                fig = figure('name', sprintf('Riptide %s Pathes', obj.name), 'numbertitle', 'off');
-                geoshow(fig_.Image, fig_.Data)
+                fig = figure('name', sprintf('Riptide %s Paths', obj.name), 'numbertitle', 'off');
+                fig_.Show
                 
             elseif nargin > 1 && isgraphics(fig_, 'figure')
                 fig = figure(fig_);
             else
-                fig = figure('name', sprintf('Riptide %s Pathes', obj.name), 'numbertitle', 'off');
+                fig = figure('name', sprintf('Riptide %s Paths', obj.name), 'numbertitle', 'off');
             end
             
             if nargin < 4, c = 'g'; end
@@ -673,21 +824,30 @@ classdef Riptide_Data
             plot(obj.path(ii).(path).lat_lon(end,2), obj.path(ii).(path).lat_lon(end,1), ['*',c]);
             plot(obj.path(ii).(path).lat_lon(end,2), obj.path(ii).(path).lat_lon(end,1), ['o',c]);
             
+            title(sprintf("Riptide %s's Paths", obj.name), 'FontSize', 14)
+            xlabel('Easitng', 'FontSize', 14)
+            ylabel('Northing', 'FontSize', 14)
+            
             hold off
             drawnow
+            
+            if nargout == 1
+                figOut = fig;
+            end
+            
         end
         
         
-        function fig = Plot_Course(obj, fig_)
+        function figOut = Plot_Course(obj, fig_)
             
             if nargin > 1 && isa(fig_, 'Geotiff')
-                fig = figure('name', sprintf('Riptide %s Pathes', obj.name), 'numbertitle', 'off');
-                geoshow(fig_.Image, fig_.Data)
+                fig = figure('name', sprintf('Riptide %s Paths', obj.name), 'numbertitle', 'off');
+                fig_.Show;
                 
             elseif nargin > 1 && isgraphics(fig_, 'figure')
                 fig = figure(fig_);
             else
-                fig = figure('name', sprintf('Riptide %s Pathes', obj.name), 'numbertitle', 'off');
+                fig = figure('name', sprintf('Riptide %s Paths', obj.name), 'numbertitle', 'off');
             end
             
             waypoints = obj.course.waypoints;
@@ -701,30 +861,49 @@ classdef Riptide_Data
             fig.CurrentAxes.Legend.String = str;
             
             hold off
+            
+            title(sprintf("Riptide %s's Paths", obj.name), 'FontSize', 14)
+            xlabel('Easitng', 'FontSize', 14)
+            ylabel('Northing', 'FontSize', 14)
             drawnow
+            
+            if nargout == 1
+                figOut = fig;
+            end
+            
+            
         end
         
         
-        function fig = Plot_Acomms(obj, fig_)
+        function figOut = Plot_Acomms(obj, fig_)
             
             if nargin > 1 && isa(fig_, 'Geotiff')
-                fig = figure('name', sprintf('Riptide %s Pathes', obj.name), 'numbertitle', 'off');
+                fig = figure('name', sprintf('Riptide %s A-comms', obj.name), 'numbertitle', 'off');
                 geoshow(fig_.Image, fig_.Data)
                 
             elseif nargin > 1 && isgraphics(fig_, 'figure')
                 fig = figure(fig_);
             else
-                fig = figure('name', sprintf('Riptide %s Pathes', obj.name), 'numbertitle', 'off');
+                fig = figure('name', sprintf('Riptide %s A-comms', obj.name), 'numbertitle', 'off');
             end
             
             hold on
             plot(obj.acomms.vehicle(:,2), obj.acomms.vehicle(:,1), '*')
             hold off
+            title(sprintf("Riptide %s's Acoustric Communications", obj.name), 'FontSize', 14)
+            xlabel('Easitng', 'FontSize', 14)
+            ylabel('Northing', 'FontSize', 14)
+            
             drawnow
+            
+            if nargout == 1
+                figOut = fig;
+            end
+            
         end
         
         
-        function fig = Plot_Altitude(obj, fig)
+        function figOut = Plot_AltimeterProfile(obj, fig)
             
             times = obj.data.timeStamp;
             
@@ -751,12 +930,29 @@ classdef Riptide_Data
             title(sprintf('%s: Atitude vs Time', obj.name), 'FontSize', 14)
             xlabel('Date-Time', 'FontSize', 14)
             ylabel('Atitude [m]', 'FontSize', 14)
-            drawnow
             legend('FontSize', 12)
+            drawnow
+            
+            if nargout == 1
+                figOut = fig;
+            end
+            
         end
         
         
-        function fig = Plot_Alt_Geotiff(obj, geotiff)
+        function figOut = Plot_Altimeter(obj, fig_)
+            
+            
+            if nargin > 1 && isa(fig_, 'Geotiff')
+                fig = figure('name', sprintf("Riptide %s's Altimiter Data", obj.name), 'numbertitle', 'off');
+                fig_.Show
+                
+            elseif nargin > 1 && isgraphics(fig_, 'figure')
+                fig = figure(fig_);
+            else
+                fig = figure('name', sprintf("Riptide %s's Altimiter Data", obj.name), 'numbertitle', 'off');
+            end
+            
             
             if isfield(obj.filteredData, 'altitude')
                 alt = obj.filteredData.altitude;
@@ -768,19 +964,28 @@ classdef Riptide_Data
             
             lat_lon = obj.path.GT.lat_lon;
             
-            fig = figure('name',sprintf("%s Altimeter", obj.name), 'numbertitle', 'off');
-            geotiff.Show
             hold on
             
-            plot(lat_lon(oo,2), lat_lon(oo,1), 'r.')        % Plot 0s
-            plot(lat_lon(~oo,2), lat_lon(~oo,1), 'g.')      % Plot ~0s
+            p1 = plot(lat_lon(oo,2), lat_lon(oo,1), 'r.');        % Plot 0s
+            p2 = plot(lat_lon(~oo,2), lat_lon(~oo,1), 'g.');      % Plot ~0s
             
             hold off
+            
+            title(sprintf("Riptide %s's Altimiter Data", obj.name), 'FontSize', 14)
+            xlabel('Easitng', 'FontSize', 14)
+            ylabel('Northing', 'FontSize', 14)
+            legend([p1, p2] ,{'Zeros'; 'Valid Data'}, 'Interpreter', 'non', 'FontSize', 12)
+            
+            drawnow
+            
+            if nargout == 1
+                figOut = fig;
+            end
             
         end
         
         
-        function fig = Show_Manifest(obj)
+        function figOut = Show_Manifest(obj)
             
             obj.Disp_Manifest;
             
@@ -800,23 +1005,81 @@ classdef Riptide_Data
             
             
             %             uit = uitable(fig, 'Data',T);
-            % %             uit.Units =  'Normalized';
+            %             uit.Units =  'Normalized';
             %             uit.Position = [20, 20, 100, 100];
+            
+            if nargout == 1
+                figOut = fig;
+            end
             
         end
         
         
-        function fig = Plot_TimeStamps(obj)
+        function figOut = Plot_TimeStamps(obj)
             
             times = obj.data.timeStamp;
             
-            fig = figure('name','Mission Timestamps','numbertitle','off');
+            fig = figure('name', sprintf('%s Mission Timestamps', obj.name), 'numbertitle', 'off');
             plot(times)
             
+            title(sprintf('%s Mission Timestamps', obj.name), 'FontSize', 14)
+            xlabel('Time Step', 'FontSize', 14)
+            ylabel('Date-Time', 'FontSize', 14)
             drawnow
-        end
             
-               
+            if nargout == 1
+                figOut = fig;
+            end
+            
+        end
+        
+        
+        
+        
+        
+        function figOut = Plot_Template(obj, fig_)
+            
+            
+            if nargin > 1 && isa(fig_, 'Geotiff')
+                fig = figure('name', sprintf("Riptide %s's Altimiter Data", obj.name), 'numbertitle', 'off');
+                fig_.Show
+                
+            elseif nargin > 1 && isgraphics(fig_, 'figure')
+                fig = figure(fig_);
+            else
+                fig = figure('name', sprintf("Riptide %s's Altimiter Data", obj.name), 'numbertitle', 'off');
+            end
+            
+            
+            if isfield(obj.filteredData, 'altitude')
+                alt = obj.filteredData.altitude;
+            else
+                alt = obj.data(1).attitude(:,4);
+            end
+            
+            oo = alt == 0;
+            
+            lat_lon = obj.path.GT.lat_lon;
+            
+            
+            p1 = plot(lat_lon(oo,2), lat_lon(oo,1), 'r.');        % Plot 0s
+            p2 = plot(lat_lon(~oo,2), lat_lon(~oo,1), 'g.');      % Plot ~0s
+            
+            hold off
+            
+            title(sprintf("Riptide %s's Altimiter Data", obj.name), 'FontSize', 14)
+            xlabel('Easitng', 'FontSize', 14)
+            ylabel('Northing', 'FontSize', 14)
+            legend([p1, p2] ,{'Zeros'; 'Valid Data'}, 'Interpreter', 'non', 'FontSize', 12)
+            
+            drawnow
+            
+            if nargout == 1
+                figOut = fig;
+            end
+            
+        end
+        
     end
     
     
