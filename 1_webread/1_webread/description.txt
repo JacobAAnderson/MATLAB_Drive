@@ -1,0 +1,14 @@
+These are the example files shown in the "Reading Web Pages, Part 1: 
+Using webread" video on the "Stuart's MATLAB Videos" blog.
+
+- path2enlightenment.m is the initial script that follows Wikipedia pages,
+  displaying the name of each page as it goes.
+
+- philosophydegrees.m is the modified script developed in the video that 
+  keeps a record of the pages visited and makes a table of the pages and 
+  the corresponding number of steps to the "Philosophy" page.
+
+- findfirstlink.m is the function that parses the html of the Wikipedia
+  page and determines the name of the first page linked. (Following the 
+  "rules of the game", it actually finds the first link in the main text
+  that isn't in italics or inside parentheses.)

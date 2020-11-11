@@ -1,0 +1,8 @@
+# Ignore matlab tags and app data
+.MATLABDriveTag
+.DS_Store
+.MATLABDriveAppData/
+Icon?
+Shared/
+Published/
+*.mat
