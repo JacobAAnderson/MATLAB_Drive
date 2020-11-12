@@ -72,7 +72,7 @@ load('/Users/jake/_OutPuts/RT_FostersLake.mat')
 
 % fig1 = geotiff.Show;                                                      % Show geotiff for plotting paths
 
-for ii = [1: numel(RT); numel(RT):-1:1], v = ii(1); s = ii(2);
+for v = 1: numel(RT)
     
     % -- Select mission --
     RT(v) = RT(v).Select_Mission( missions(v) );                            % Choose Mission
@@ -82,16 +82,8 @@ for ii = [1: numel(RT); numel(RT):-1:1], v = ii(1); s = ii(2);
     RT(v) = RT(v).Add_TBN(bathy);                                           % Prep Particle filters
     RT(v) = RT(v).Model_VehicleSpeed;                                       % Calculate corrected speed from GPS
     RT(v) = RT(v).Model_Compass('poly2');                                   % Model / Calibrate Compass data
-    RT(v) = RT(v).Model_Altimiter(true);                                    % Filter Altimiter data and build normal distribution
+    RT(v) = RT(v).Model_Altimiter(false);                                   % Filter Altimiter data and build normal distribution
     RT(v) = RT(v).Get_VehiclePaths;                                         % Evaluate GT and Corrected DR paths from the speed and compass models
-    
-    
-    % -- Communication planning stuff --
-    RT(v) = RT(v).Add_CommsPlanner;
-    
-    RT(v).commsPlanner = RT(v).commsPlanner.Add_Vehicle(RT(v).VehicleInfo('self'));
-    RT(v).commsPlanner = RT(v).commsPlanner.Add_Vehicle(RT(s).VehicleInfo);
-   
     
     
     % -- Plot/display Stuff --
@@ -101,6 +93,9 @@ for ii = [1: numel(RT); numel(RT):-1:1], v = ii(1); s = ii(2);
 %     RT(v).Plot_Altimeter(geotiff);                                        % Show Altimeter location on map
 
 end
+
+
+
 
 
 [mu, sig] = rtAcms.Mission_Latency(RT);                                     % Get Acoustic modem model for the selected mission
@@ -120,11 +115,10 @@ RT_ = RT;                                                                   % Ke
 
 
 % ---- Get Timeline -----
-disp("--- Getting Time Line ---")
-tic
-
 if ~isequal( timeLine_mission, missions)
-    
+    disp("--- Getting Time Line ---")
+    tic
+
     timeLine_mission = missions;
     timeLine = [RT(1).data.gpsDate;
         RT(1).acomms.gpsDate;
@@ -135,7 +129,41 @@ if ~isequal( timeLine_mission, missions)
     fprintf("Time Line finished\nElapsed time: %.1f [sec]\n\n", toc)
 end
 
-% _____ Do TBN _____________________
+
+
+%% Communication planning
+clc
+close all
+
+for ii = [1: numel(RT); numel(RT):-1:1], v = ii(1); s = ii(2);
+
+    RT(v) = RT(v).Add_CommsPlanner;                                                     % Instanciate communications planner
+    
+    RT(v).commsPlanner = RT(v).commsPlanner.Add_Vehicle(RT(v).VehicleInfo('self'));     % Load vehicle info into the planner
+    RT(v).commsPlanner = RT(v).commsPlanner.Add_Vehicle(RT(s).VehicleInfo);
+   
+end
+
+coms_times = RT(1).acomms.gpsDate;
+
+dt = seconds(mean ( coms_times(2:end) - coms_times(1:end-1) ));
+
+sz = numel(coms_times);
+coms_policy = zeros(numel(RT), sz);
+
+for v = 1: numel(RT)
+    fprintf('Comms Planning for %s\n', RT(v).name)
+    
+    policy = RT(v).commsPlanner.Plan1(sz, dt, 1.25, true);
+    
+    coms_policy(v, 1:size(policy,1) ) = policy';
+end
+
+
+clear ii v s
+
+
+%% _____ Do TBN _____________________
 clc
 close all
 

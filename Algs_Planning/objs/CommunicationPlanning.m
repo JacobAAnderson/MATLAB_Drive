@@ -24,6 +24,21 @@ classdef CommunicationPlanning
         % Add vehicles to the planning algorithm
         function obj = Add_Vehicle(obj, pf, path, name_, r, maxspeed, speedNoise, compassNoise)
             
+            % Check if the info is packed into a cell from being used inside the function call
+            if nargin == 2
+                
+                path         = pf{2}; 
+                name_        = pf{3}; 
+                r            = pf{4}; 
+                maxspeed     = pf{5};
+                speedNoise   = pf{6}; 
+                compassNoise = pf{7};
+                pf           = pf{1};
+                
+            end
+            
+            
+            
             ii = obj.vehicles(1).count + 1;
             
             obj.vehicles(ii).PF         = pf;
@@ -233,7 +248,7 @@ classdef CommunicationPlanning
                 action = false;                                             % No comms --> Action = false
                 
                 for ii = leafs(1).count : -1: 1                             % Iterate through leaf nodes
-                   [B, cov] = Expand(leafs(ii).value, dt);                % Forward simulate node without communication
+                   [B, cov, ~] = Expand(leafs(ii).value, dt);                % Forward simulate node without communication
 %                    [B, cov] = Expand_all(leafs(ii).value, dt);             % Forward simulate node without communication and all otehr robots communicating
                     
                     % Compare the resulting localization uncertainty
@@ -260,7 +275,7 @@ classdef CommunicationPlanning
                 
                 % --- Simulate With Communications ---
                 n = n+1;                                                    % New node index
-                [leafs(1).value, err_b, done] = BaseLine(leafs(1).value, dt);   % Forward simulate base node with communication
+                [leafs(1).value, err_b, ~, done] = BaseLine(leafs(1).value, dt);   % Forward simulate base node with communication
                 leafs(1).indx = n;                                          % Add to base of leafnodes
                 leafs(1).count = leafs(1).count + 1;
                 leafs(1).cov = err_b;
@@ -746,12 +761,12 @@ classdef CommunicationPlanning
                 % ___ Update with comms __________________________________
                 dist = vecnorm( pf0.X(1:2) - self.X(1:2));
                 
-                acoms = {'acoms', dist + random('Normal', 0, 0.5), self.X(1:2)', self.Cov(1:2,1:2)};
+                acoms = {'acoms', dist + random('Normal', 0, 0.5), self.X(1:2)', self.cov(1:2,1:2)};
                 
                 pf2 = pf0.Update(speed, dt, heading, measurment, acoms);
                 
                 
-                if trace(pf1.Cov(1:2,1:2)) > 1.25 * trace(pf2.Cov(1:2,1:2))
+                if trace(pf1.cov(1:2,1:2)) > 1.25 * trace(pf2.cov(1:2,1:2))
                     comms = true;
                     obj.vehicles(ii).PF = pf2;
                 else
@@ -788,7 +803,7 @@ classdef CommunicationPlanning
             pf0 = pf0.Update(speed, dt, heading, measurment);
             
             
-            if vecnorm(self.X(1:2)' - pf0.X(1:2)') > trace(self.Cov(1:2,1:2))
+            if vecnorm(self.X(1:2)' - pf0.X(1:2)') > trace(self.cov(1:2,1:2))
                 comms = true;
                 obj.vehicles(ii).PF = self;
             else
@@ -834,18 +849,18 @@ for ii = [1:c; 1:2:c*2]
     if ii(1) == 1
         [vehicles(1), done(1)] = Simulate(vehicles(1), dt);
         X   = vehicles(1).PF.X;
-        Cov = vehicles(1).PF.Cov;
-%         err = trace(vehicles(ii).PF.Cov);
+        Cov = vehicles(1).PF.cov;
+%         err = trace(vehicles(ii).PF.cov);
     else
         [vehicles( ii(1) ), done( ii(1) )] = Simulate(vehicles( ii(1) ), dt, X, Cov);
-%         if trace(err) < trace(vehicles(ii).PF.Cov), err = vehicles(ii).PF.Cov; end
+%         if trace(err) < trace(vehicles(ii).PF.cov), err = vehicles(ii).PF.cov; end
     end
     
     set = ii(2): ii(2)+1;
     dist.mu(set)      = vehicles( ii(1) ).PF.X(1:2);
-    dist.cov(set,set) = vehicles( ii(1) ).PF.Cov(1:2,1:2);
+    dist.cov(set,set) = vehicles( ii(1) ).PF.cov(1:2,1:2);
     
-    err = err + trace(vehicles( ii(1) ).PF.Cov);
+    err = err + trace(vehicles( ii(1) ).PF.cov);
 end
 
 % err  = trace(err);
@@ -870,17 +885,17 @@ for ii = [1:c; 1:2:c*2]
     
     set = ii(2): ii(2)+1;
     dist.mu(set)      = vehicles( ii(1) ).PF.X(1:2);
-    dist.cov(set,set) = vehicles( ii(1) ).PF.Cov(1:2,1:2);
+    dist.cov(set,set) = vehicles( ii(1) ).PF.cov(1:2,1:2);
     
     
-    err = err + trace(vehicles( ii(1) ).PF.Cov);
+    err = err + trace(vehicles( ii(1) ).PF.cov);
 
-%     err_ = trace(vehicles(ii).PF.Cov);
+%     err_ = trace(vehicles(ii).PF.cov);
 % 
 %     if err_ > err, err = err_; end
     
-%      if ~strcmp(vehicles(ii).name, 'self') && trace(err) < trace(vehicles(ii).PF.Cov)
-%         err = vehicles(ii).PF.Cov;
+%      if ~strcmp(vehicles(ii).name, 'self') && trace(err) < trace(vehicles(ii).PF.cov)
+%         err = vehicles(ii).PF.cov;
 %     end
 end
 end
@@ -904,11 +919,12 @@ measurment = pf.Map.Depth(dr) + normrnd( 0, 0.06);                          % Ge
 if nargin < 3
     pf = pf.Update(speed, dt, heading, measurment);
 else
-    dist = vecnorm( pf.X(1:2) - X(1:2));
+    dist = vecnorm( pf.X(1:2) - X(1:2)) + random('Normal', 0, 0.5);
     
-    acoms = {'acoms', dist + random('Normal', 0, 0.5), X(1:2)', Cov(1:2,1:2)};
+%     acoms = {'acoms', dist + random('Normal', 0, 0.5), X(1:2)', Cov(1:2,1:2)};
     
-    pf = pf.Update_Acoms(speed, dt, heading, measurment, acoms);
+    pf = pf.Acoms(dist, X(1:2)', Cov(1:2,1:2));
+    pf = pf.Update(speed, dt, heading, measurment);
     
 end
 
@@ -949,7 +965,7 @@ end
 % 
 % if action > 0
 %    X = vehicles(action).PF.X;
-%    Cov = vehicles(action).PF.Cov;
+%    Cov = vehicles(action).PF.cov;
 % end
 % 
 % for ii = 1: vehicles(1).count
@@ -960,7 +976,7 @@ end
 %         [vehicles(ii), done(ii)] = Simulate(vehicles(ii), dt, X, Cov);
 %     end
 %     
-%     err_ = trace(vehicles(ii).PF.Cov);
+%     err_ = trace(vehicles(ii).PF.cov);
 % 
 %     if err_ > err, err = err_; end
 %     

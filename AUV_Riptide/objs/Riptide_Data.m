@@ -626,10 +626,10 @@ classdef Riptide_Data
  
             angle(isnan(angle)) = compass(isnan(angle));
             
-            mu = nanmean(err);
-            sig = nanstd(err);
+%             mu = nanmean(err);
+%             sig = nanstd(err);
             
-            obj.vehicleModel.compass = makedist('Normal','mu', mu,'sigma',20);
+            obj.vehicleModel.compass = makedist('Normal','mu', 0,'sigma',20);
             obj.vehicleModel.units.compass = 'deg';
             
             c = compass(~isnan(angle));
@@ -738,13 +738,29 @@ classdef Riptide_Data
             
             speed = obj.filteredData.speed(1);
             
-            speedNoise   = obj.vehicleModel.speed.sigma;
-            compassNoise = obj.vehicleModel.compass.sigma;
+            speedNoise   = obj.vehicleModel.speed;
+            compassNoise = obj.vehicleModel.compass;
             
-            path = obj.course.waypoints;
+            path = fliplr(obj.course.waypoints);
             
-            trueStart = obj.path.GT.utm(1,:);
+            trueStart = obj.path.GT.lat_lon(1,:);
             
+            dxdy = path(1,:) - trueStart;
+            
+            path = path - dxdy;
+            
+            
+            [xx, yy] = deg2utm( path(:,1), path(:,2) );
+            
+            path = [xx,yy];
+            
+            
+            % Pack the information into a cell array so that we can nest this function call inside another function call
+            if nargout == 1
+            
+                pf = {pf, path, name_, r, speed, speedNoise, compassNoise};
+                
+            end
             
             
         end
