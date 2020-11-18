@@ -101,6 +101,10 @@ Data.recived_type = recive_typ;
 Data.pAcomms_tof  = NaT(numel(rawData.Mission),4, 'Format', format);
 
 Data.tof          = seconds( NaN(numel(rawData.Mission),1) );
+
+Data.gt           = NaN(numel(rawData.Mission),1);
+
+
 end
 
 

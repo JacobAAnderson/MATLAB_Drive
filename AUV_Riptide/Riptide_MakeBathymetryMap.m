@@ -35,11 +35,11 @@ RT = Riptide_Data(paths.rt, paths.offset, '21x', filters);                  % Re
 rt_bathy = cat(1, RT.rawData.bathymetry);
 
 
-[alt, idx] = FilterRawAltimeter(rt_bathy(:,3), 16);                         % Filter Altimiter Data
-rt_bathy = [rt_bathy(idx,1:2), -alt(idx)];
+% [alt, idx] = FilterRawAltimeter(rt_bathy(:,3), 16);                         % Filter Altimiter Data
+% rt_bathy = [rt_bathy(idx,1:2), -alt(idx)];
 
 
-% rt_bathy(:,3) = -rt_bathy(:,3);                                             % Invert depth measurments
+rt_bathy(:,3) = -rt_bathy(:,3);                                             % Invert depth measurments
 
 
 % --- Get Data From Lutra ---- 
@@ -79,7 +79,7 @@ bathy_map = bathy_map.MakeMap(data);                                        % Ma
 
 bathy_map.PlotMap(geotiff);
 
-bathy_map = bathy_map.MapSmoothing;
+% bathy_map = bathy_map.MapSmoothing;
 
 bathy_map.PlotMap(geotiff);
 
@@ -91,11 +91,11 @@ bathy_map.PlotMap(geotiff);
 
 
 %% Display Bathymetry
-fig1 = bathy_map.Plot_3DModel(250, 30);                                     % Plot Bathymetry Model
-
-if ~isempty(geotiff.Image)
-    fig2 = bathy_map.PlotMap(geotiff);                                      % Plot Map over the Geotiff 
-end
+% fig1 = bathy_map.Plot_3DModel(250, 30);                                     % Plot Bathymetry Model
+% 
+% if ~isempty(geotiff.Image)
+%     fig2 = bathy_map.PlotMap(geotiff);                                      % Plot Map over the Geotiff 
+% end
 
 
 %% Save Map
@@ -142,12 +142,15 @@ Q = 0.1;             % Uncertainty in the process model
 R =std(alt);        % Measurment Standard Deviation
 
 x = 0;              % State
-sig = 0.75;         % Error in the state
+sig = R;            % Error in the state
 u = 0;              % Control input
 
 for ii = 2:numel(alt)
     
-    if alt(ii) == 0, continue, end
+    if alt(ii) == 0
+        sig = R * 2;
+        continue 
+    end
     
     z = alt(ii);
     

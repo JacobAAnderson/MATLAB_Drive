@@ -63,29 +63,31 @@ load('/Users/jake/_OutPuts/RT_FostersLake.mat')
 % missions = [10,11];         % Fosters Lake Mission Set: ZZ3_A, ZZ3_B                  --> Decent Acomms
 
 % ------ 2020-10-27 ----------------
- missions = [11,12];         % Fosters Lake Mission Set:CircumNav2_B, CircumNave2_A    --> Decent Acomms
-% missions = [14,15];         % Fosters Lake Mission Set:ZZ1, ZZ2                         --> Decent Acomms
+% missions = [11,12];         % Fosters Lake Mission Set:CircumNav2_B, CircumNave2_A    --> Decent Acomms
+% missions = [14,15];         % * Fosters Lake Mission Set:ZZ1, ZZ2                       --> Decent Acomms
 % missions = [15,16];         % Fosters Lake Mission Set:Dimond1_A, Dimond1_B  (DEC-TBN Does better)
-% missions = [16,17];         % Fosters Lake Mission Set:ZZ4_B, ZZ4_A  
-
+ missions = [16,17];         % * Fosters Lake Mission Set:ZZ4_B, ZZ4_A  
 
 
 % fig1 = geotiff.Show;                                                      % Show geotiff for plotting paths
 
 for v = 1: numel(RT)
     
+    RT(v) = RT(v).VehicleModeling('poly2', bathy, missions(v));                    % Do vehicle modeling that excludes data from the selected mission
+    
     % -- Select mission --
     RT(v) = RT(v).Select_Mission( missions(v) );                            % Choose Mission
     RT(v) = RT(v).Get_VehiclePaths;                                         % Evaluate GT and DR paths for speed and compass modeling
     
-    % -- Terrain Based Navigation stuff --
-    RT(v) = RT(v).Add_TBN(bathy);                                           % Prep Particle filters
+    % -- Vehicle Modeling --
     RT(v) = RT(v).Model_VehicleSpeed;                                       % Calculate corrected speed from GPS
     RT(v) = RT(v).Model_Compass('poly2');                                   % Model / Calibrate Compass data
-    RT(v) = RT(v).Model_Altimiter(false);                                   % Filter Altimiter data and build normal distribution
     RT(v) = RT(v).Get_VehiclePaths;                                         % Evaluate GT and Corrected DR paths from the speed and compass models
     
-    
+    % -- Terrain Based Navigation stuff --
+    RT(v) = RT(v).Add_TBN(bathy);                                           % Prep Particle filters
+    RT(v) = RT(v).Model_Altimiter(true);                                    % Filter Altimiter data and build normal distribution
+   
     % -- Plot/display Stuff --
     RT(v).Disp_Manifest;                                                    % Display Vehicle Manifest
 %     fig1 = RT(v).Plot_Paths(fig1);                                        % Show paths on a geotiff
@@ -93,9 +95,6 @@ for v = 1: numel(RT)
 %     RT(v).Plot_Altimeter(geotiff);                                        % Show Altimeter location on map
 
 end
-
-
-
 
 
 [mu, sig] = rtAcms.Mission_Latency(RT);                                     % Get Acoustic modem model for the selected mission
@@ -107,7 +106,7 @@ for v = 1:numel(RT)                                                         % Se
     RT(v).tbn = RT(v).tbn.SetNoise('acoms',  'Normal', m, s * 1.5);         % Set acoustic modem error Distributions
 end
 
-rtAcms.Plot_AcousticCommunications(RT, geotiff);                            % Plot Acoustic Communications
+% rtAcms.Plot_AcousticCommunications(RT, geotiff);                            % Plot Acoustic Communications
 
 clear v m s
 
@@ -131,42 +130,45 @@ end
 
 
 
-%% Communication planning
+% Communication planning
+% clc
+% close all
+% 
+% for ii = [1: numel(RT); numel(RT):-1:1], v = ii(1); s = ii(2);
+% 
+%     RT(v) = RT(v).Add_CommsPlanner;                                                     % Instanciate communications planner
+%     
+%     RT(v).commsPlanner = RT(v).commsPlanner.Add_Vehicle(RT(v).VehicleInfo('self'));     % Load vehicle info into the planner
+%     RT(v).commsPlanner = RT(v).commsPlanner.Add_Vehicle(RT(s).VehicleInfo);
+%    
+% end
+% 
+% 
+% coms_times = RT(1).acomms.gpsDate;
+% 
+% dt = seconds(mean ( coms_times(2:end) - coms_times(1:end-1) ));
+% 
+% sz = numel(coms_times);
+% 
+% for v = 1: numel(RT)
+%     fprintf('Comms Planning for %s\n', RT(v).name)
+%     
+%     missionDuration =  RT(v).data.timeStamp(end) - RT(v).data.timeStamp(1);
+%     
+%     sz = floor(missionDuration / dt);
+%     
+%     RT(v).acomms.policy = RT(v).commsPlanner.Plan1(sz, dt, 1.25, false);
+%     
+% end
+% 
+% 
+% clear ii v s
+
+
+% _____ Do TBN _____________________
 clc
 close all
-
-for ii = [1: numel(RT); numel(RT):-1:1], v = ii(1); s = ii(2);
-
-    RT(v) = RT(v).Add_CommsPlanner;                                                     % Instanciate communications planner
-    
-    RT(v).commsPlanner = RT(v).commsPlanner.Add_Vehicle(RT(v).VehicleInfo('self'));     % Load vehicle info into the planner
-    RT(v).commsPlanner = RT(v).commsPlanner.Add_Vehicle(RT(s).VehicleInfo);
-   
-end
-
-coms_times = RT(1).acomms.gpsDate;
-
-dt = seconds(mean ( coms_times(2:end) - coms_times(1:end-1) ));
-
-sz = numel(coms_times);
-coms_policy = zeros(numel(RT), sz);
-
-for v = 1: numel(RT)
-    fprintf('Comms Planning for %s\n', RT(v).name)
-    
-    policy = RT(v).commsPlanner.Plan1(sz, dt, 1.25, true);
-    
-    coms_policy(v, 1:size(policy,1) ) = policy';
-end
-
-
-clear ii v s
-
-
-%% _____ Do TBN _____________________
-clc
-close all
-
+ 
 num_trials = 1;
 
 % --- Instanciate rAd to track data ---
@@ -178,17 +180,17 @@ types = {'Dory_Error', 'Nemo_Error', 'Joint_Error', 'Time'};
 RT = RT_;
 
 
-for prop = { 'altimeter', 'compass' 'speed';           % --> Type of noise
-             'Normal',    'Normal', 'Normal';          % --> Default distribion type
-              0,           0,        0;                % --> Default mu
-              2.5,         30,       2.0;              % --> Sigma for Dory
-              2.5,         30,       2.0}              % --> Sigma for Nemo
-    
-
-        RT(1).tbn = RT(1).tbn.SetNoise(prop{1}, prop{2}, prop{3}, prop{4});
-        RT(2).tbn = RT(2).tbn.SetNoise(prop{1}, prop{2}, prop{3}, prop{5});
-
-end
+% for prop = { 'altimeter', 'compass' 'speed';           % --> Type of noise
+%              'Normal',    'Normal', 'Normal';          % --> Default distribion type
+%               0,           0,        0;                % --> Default mu
+%               2.5,         30,       2.0;              % --> Sigma for Dory
+%               2.5,         30,       2.0}              % --> Sigma for Nemo
+%     
+% 
+%         RT(1).tbn = RT(1).tbn.SetNoise(prop{1}, prop{2}, prop{3}, prop{4});
+%         RT(2).tbn = RT(2).tbn.SetNoise(prop{1}, prop{2}, prop{3}, prop{5});
+% 
+% end
 
 
 
@@ -196,7 +198,7 @@ end
 for dec_tbn = [false, true]                                                 % Switch between TBN and DEC-TBN
     for iter = 1: num_trials
         
-        [tbnPaths, sim_times] = Riptide_TBN_Sim(RT, timeLine, sos, mu, dec_tbn);    % Do TBN / DEC-TBN simulation
+        [tbnPaths, sim_times, ~] = Riptide_TBN_Sim(RT, timeLine, sos, mu, dec_tbn);    % Do TBN / DEC-TBN simulation
         
         rAd = TallyPathData(rAd, iter, paths(2:3), gtPaths, tbnPaths, sim_times, timeLine, dec_tbn);     % Calculate path errors and add to rAd
         
@@ -218,6 +220,7 @@ for dec_tbn = [false, true]                                                 % Sw
 end
 
 
+
 rAd = rAd.Eval_Stats('Time');                                               % Determine average error and total error
 
 DisplyRAD(rAd, types, paths)                                                % Display Result Stats
@@ -226,7 +229,9 @@ DisplyRAD(rAd, types, paths)                                                % Di
 % ____ Display Specific Graphs ___________________________________________
 for v = 1:numel(RT)
     
-    RT(v).Plot_Paths(geotiff, {'GT', 'DR_corrected', 'TBN', 'DEC_TBN'});                                             % Plot lat-lon path on geotiff
+%    RT(v).Plot_Paths(geotiff, {'EKF'});
+    
+     RT(v).Plot_Paths(geotiff, {'GT', 'DR_corrected', 'TBN', 'DEC_TBN'});                                             % Plot lat-lon path on geotiff
    
 end
 

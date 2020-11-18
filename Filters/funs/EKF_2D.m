@@ -45,7 +45,7 @@ function [meanGrid, varargout] = EKF_2D(dataX, dataY, dataRaw, varargin)
 % Initalize parameters that can be change by the varargin --------------------------------------------------------------
 gridCellResolution = 0.1;
 window = 20;
-baseFloor = min(dataRaw(:));
+baseFloor = mean(dataRaw(:));
 std_theshold = 2;
 sigma_slope = 0.1204;
 sigma_offset = 0.6142;

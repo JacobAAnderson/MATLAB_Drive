@@ -21,7 +21,6 @@ classdef Riptide_Data
         rawData
         tbn
         vehicleModel
-        states
     end
     
     methods
@@ -228,10 +227,8 @@ classdef Riptide_Data
             % Create perfect altimiter profile for testing
             
             gt = obj.path.GT.utm;
-            dr = obj.path.DR_corrected.utm;
             
-            obj.orical.gtAlt = map.Depth(gt);
-            obj.orical.drAlt = map.Depth(dr);
+            obj.orical.alt = map.Depth(gt);
             
             
             
@@ -251,67 +248,58 @@ classdef Riptide_Data
       
 
         % Kalman filter altimiter data
-        function [alt, obj] = Filter_Altimiter(obj, ii)
+        function alt1 = Filter_Altimiter(obj, threshold)
             
-            % --- Filter position ----
-            speed   = obj.data(1).attitude(ii,5);
-            heading = obj.data(1).attitude(ii,3);
-            dt      = obj.data.timeStep(ii);
+            alt = obj.data(1).attitude(:,4);
             
+%             mu  = mean(alt);
+%             sig = std(alt);
             
-            z = obj.tbn.X(1:2);                                  % Estimated location of the vehicle
-            R = obj.tbn.cov(1:2,1:2);
+            % --- Filter Altimiter Data ----
+            if nargin == 2
+                alt(alt > threshold) = 0;
+            end
             
-            Q=eye(2);                                       % covariance of process
+            alt(alt < 0) = 0;
+            alt1 = alt;
             
-            f=@(x)[x(1) + speed * dt * sind( heading );      % nonlinear state equations
-                   x(2) + speed * dt * cosd( heading )];  
+            A = 1;              % Process Model
+            B = 1;              % Control Model
+            C = 1;              % Observation Matrix
             
-            h=@(x) x;                                       % measurement equation
+            Q = 1;              % Uncertainty in the process model
+            R =std(alt);        % Measurment Standard Deviation
             
-            x = obj.states.x;                               % state
-            P = obj.states.P;                               % state covariance 
+            u = 0;              % Control input
             
+            sw = SlidingWindow(20, numel(alt));                             % Slididng window ojbect
             
-            [x, P] = ekf(f,x,P,h,z,Q,R);                    % ekf
-            
-            obj.states.x = x;
-            obj.states.P = P;
-            
-%             obj.path.EKF.utm(ii,:) = x';
-            
-            
-            
-            % ---- Filter Altitude ----
-            
-            x = obj.tbn.Map.Depth(x');          % Altitude Estimat
-            
-            z = obj.filteredData.altitude(ii);      % Altimiter Measurement
-            
-            alt = (x + z)/2;
-            
-            obj.filteredData.altitude(ii) = alt;
-            
-            return
-            
-            
-            sig = obj.filteredData.altSig;          % Error in the state
-            
-            A = 1;                                  % Process Model
-            B = 1;                                  % Control Model
-            C = 1;                                  % Observation Matrix
-            
-            Q = 1;                                  % Uncertainty in the process model
-            R = obj.vehicleModel.altimeter.sigma;   % Measurment Standard Deviation
-            
-            u = 0;                                  % Control input
+            for c = 1:2
+                
+                x = alt(1);         % State
+                sig = 0.75;         % Error in the state
+                
+                for ii = 2:numel(alt)
                     
-            
-            [alt, sig] = Kalman_Filter(x, sig, u, z, A, B, C, Q, R);        % Filter the measurment
-            
-            obj.filteredData.altSig = sig;                                  % Keep track of the error
-            
-            obj.filteredData.altitude(ii) = alt;
+                    rows = sw.D1(ii);
+                    window = alt(rows);
+                    oo = window == 0;
+                    
+                    if sum(oo) > 12, alt1(ii) = 0; continue %, end
+                        
+                    elseif alt(ii) == 0, z = mean(window(window ~= 0));
+                    else,            z = alt(ii);
+                    end
+                    
+                    %                 z = alt(ii);
+                    
+                    [x, sig] = Kalman_Filter(x, sig, u, z, A, B, C, Q, R);
+                    
+                    alt1(ii) = x;
+                end
+                
+                alt = alt1;
+            end
             
         end
         
@@ -319,34 +307,8 @@ classdef Riptide_Data
         % Get Vehicle Path in UTM an degrees lat-lon
         function obj = Get_VehiclePaths(obj)
             
-            % -- Clear old paths --
             obj.path = [];
             
-            
-            % ----- Ground true paths ------
-            gps0 = obj.data(1).vehicle(:,1:2);                              % Get Vehicle Location
-           
-            
-            % Smooth out the GPS data to determin the true vehicle heading
-            gps1 = zeros(size(gps0));
-            n = size(gps0,1);
-            sw = SlidingWindow(20, n);
-            
-            for ii = 1:n
-                
-                data_ = gps0(sw.D1(ii),:);
-                gps1(ii,:) = mean(data_);
-                
-            end
-            
-            [xx, yy, utmzone] = deg2utm( gps1(:,1), gps1(:,2) );
-            
-            obj.path.GT.lat_lon = gps1;
-            obj.path.GT.utm     = [xx,yy];
-            obj.path.GT.utmzone = utmzone;
-            
-            
-            % ----- Dead Rekoning Paths -----
             speed     = obj.data(1).attitude(:,5);
             heading   = obj.data(1).attitude(:,3);
             timestamp = obj.data(1).timeStamp;
@@ -359,9 +321,13 @@ classdef Riptide_Data
             x = cumsum(deltaX_dr);
             y = cumsum(deltaY_dr);
             
-            
+            [xx, yy, utmzone] = deg2utm( obj.data(1).vehicle(:,1), obj.data(1).vehicle(:,2) );
             
             [dr_lat, dr_lon] = utm2deg(x + xx(1), y+yy(1), utmzone);
+            
+            obj.path.GT.lat_lon = obj.data(1).vehicle(:,1:2);
+            obj.path.GT.utm     = [xx,yy];
+            obj.path.GT.utmzone = utmzone;
             
             obj.path.DR.utm(:,1) = x + xx(1);
             obj.path.DR.utm(:,2) = y + yy(1);
@@ -369,19 +335,7 @@ classdef Riptide_Data
             
             obj.data.timeStep = timeStep_;
             
-            obj.states.x = obj.path.GT.utm(1,:);
-            obj.states.P = eye(2) * 3;
-            
-            % -- tracke EKF path --
-            obj.path.EKF.utm     = NaN( size( obj.path.GT.utm) );
-            obj.path.EKF.lat_lon = NaN( size( obj.path.GT.utm) );
-            
-            obj.path.EKF.utm(1,:)     = obj.path.GT.utm(1,:);
-            obj.path.EKF.lat_lon(1,:) = obj.path.GT.utm(1,:);
-            
-            
-            % -- Do corrected DR ?? --
-            if ~ ( isfield( obj.filteredData, 'speed') || isfield( obj.filteredData, 'heading') ), return, end
+            if ~ ( isfield( obj.vehicleModel, 'speed') || isfield( obj.filteredData, 'heading') ), return, end
             
             if isfield( obj.vehicleModel, 'speed'),   speed   = obj.filteredData.speed;   end
             if isfield( obj.filteredData, 'heading'), heading = obj.filteredData.heading; end
@@ -533,9 +487,9 @@ classdef Riptide_Data
             
             % Assume Mission Has been selected
             speed     = obj.data(1).attitude(:,5);
+            lat_lon   = obj.data(1).vehicle(:,1:2);
             timestamp = obj.data(1).timeStamp;
-            lat_lon   = obj.path.GT.lat_lon;
-            
+                
             timestep = seconds(timestamp(2:end) - timestamp(1: end-1));
             timestep = [0;timestep];
             
@@ -543,123 +497,78 @@ classdef Riptide_Data
             out = speed == 0;
             timestep(out)  = [];
             lat_lon(out,:) = [];
+           
+            % Covert locations into utms for representation in meters
+            [xx, yy, ~] = deg2utm(lat_lon(:,1), lat_lon(:,2));
             
-            if isfield(obj.vehicleModel, 'speedFit')
-                
-                obj.filteredData.speed    = speed;
-                obj.filteredData.speed(:) = obj.vehicleModel.speedFit;
-                obj.data.timeStep         = timestep;
-                
-            else
-                
-                
-                % Covert locations into utms for representation in meters
-                [xx, yy, ~] = deg2utm(lat_lon(:,1), lat_lon(:,2));
-                
-                % Calculate the distance traveled between each time step
-                dists = vecnorm( [xx(2:end), yy(2:end)] - [xx(1:end-1), yy(1:end-1)] , 2, 2);
-                
-                % Calculate the actual speed of the vehicle
-                actualSpeed = dists./timestep(2:end);
-                
-                % Get the avarage speed and standard deviation
-                mu  = mean(actualSpeed);
-                sig = std(actualSpeed);
-                
-                speed(speed > 0) = mu;
-                
-                obj.vehicleModel.speed       = makedist('Normal', 'mu', 0, 'sigma', sig);
-                obj.vehicleModel.units.speed = "m/s";
-                obj.filteredData.speed       = speed;
-                obj.data.timeStep            = timestep;
-                
-            end
+            % Calculate the distance traveled between each time step
+            dists = vecnorm( [xx(2:end), yy(2:end)] - [xx(1:end-1), yy(1:end-1)] , 2, 2);
+            
+            % Calculate the actual speed of the vehicle
+            actualSpeed = dists./timestep(2:end);
+            
+            % Get the avarage speed and standard deviation
+            mu  = mean(actualSpeed);
+            sig = std(actualSpeed);
+            
+            speed(speed > 0) = mu;
+            
+            obj.vehicleModel.speed       = makedist('Normal', 'mu', 0, 'sigma', 0.5);
+            obj.vehicleModel.units.speed = "m/s";
+            obj.filteredData.speed       = speed;
+            obj.data.timeStep            = timestep;
         end
         
         
         % Calculate the altimiter Noise
         function obj = Model_Altimiter(obj, plotIO)
             
-%             mapAlt = obj.orical.gtAlt;
-            
-            if isfield(obj.orical, 'drAlt')
-                mapAlt = obj.orical.drAlt;
-            else
-                mapAlt = [16, 0];
-            end
+            mapAlt = obj.orical.alt;
             
             alt = obj.data(1).attitude(:,4);
             
-%             if size(alt) ~= size(mapAlt) && numel(mapAlt) ~= 2
-%                 warning('Altimiter profile and bathymetric profile are diferent sizes')
-%             end
+            if size(alt) ~= size(mapAlt)
+                warning('Altimiter profile and bathymetric profile are diferent sizes')
+            end
             
             
             out = alt > max(mapAlt(:)) | ...
-                alt < min(mapAlt(:)) | ...
-                alt == 0;
+                  alt < min(mapAlt(:)) | ...
+                  alt == 0;
             
-            sig_ = nanstd(alt(~out));
-            alt(out) = 0;
+            alt(out) = nan;
             
-            sig = sig_;
-            x   = alt(1);
+            
+            sw = SlidingWindow(20, numel(alt));                             % Slididng window ojbect
+            
             for ii = 1:numel(alt)
                 
-                if alt(ii) == 0
-                    sig = 2 * sig_;
-                    continue
-                end
+                rows = sw.D1(ii);
                 
-                z = alt(ii);
-                
-                A = 1;                                  % Process Model
-                B = 1;                                  % Control Model
-                C = 1;                                  % Observation Matrix
-                
-                Q = 1;                                  % Uncertainty in the process model
-                R = sig;                                % Measurment Standard Deviation
-                
-                u = 0;                                  % Control input
-                
-                
-                [x, sig] = Kalman_Filter(x, sig, u, z, A, B, C, Q, R);        % Filter the measurment
-                
-                
-                alt(ii) = x;
+                alt(ii) = nanmean([alt(rows);mapAlt(rows)]);
                 
             end
             
-            if isfield(obj.vehicleModel, 'altFit')                          % if the vehicle has been modeled than use that modle to correct the altimiter
-                
-                alt(alt > 0) = alt(alt > 0) + obj.vehicleModel.altFit;
-                
-            else
-                
-                obj.vehicleModel.altimeter = makedist('Normal','mu', 0,'sigma',sig_ * 3);
-                obj.vehicleModel.units.altimeter = "m";
-                
-                
-            end
+            alt(out) = 0;
             
+            sig = nanstd(alt);
+            
+            obj.vehicleModel.altimeter = makedist('Normal','mu', 0,'sigma',sig * 2);
+            obj.vehicleModel.units.altimeter = "m";
             obj.filteredData.altitude = alt;
-            obj.filteredData.altSig   = sig;
             
             
             if nargin == 2 && plotIO
-                
-                alt(alt == 0) = NaN;
-                
                 figure('name', sprintf('%s Altimiter Profiles', obj.name))
-                p1 = plot(alt);
+                p1 = plot(alt, '.');
                 hold on
-                p2 = plot(obj.orical.gtAlt);
+                p2 = plot(mapAlt);
                 hold off
                 
                 xlabel('Time Step')
                 ylabel('Altitude [m]')
                 title( sprintf('%s Altimiter Profile', obj.name) )
-                legend([p1,p2], {'Filtered Alt', 'GT Bathy Profile'} )  %, 'DR Bathy Profile'
+                legend([p1,p2], {'Filtered Altimiter', 'Bathymetry Profile'} )
             end
             
         end
@@ -670,96 +579,88 @@ classdef Riptide_Data
             
             compass = obj.data(1).attitude(:,3);                            % Comapss heading
             
-            if isfield(obj.vehicleModel, 'compassFit')
+            gps0 = obj.path.GT.utm;                                         % Get Vehicle Location
+            gps1 = zeros(size(gps0));
+            
+            % Smooth out the GPS data to determin the true vehicle heading
+            n = size(gps0,1);
+            sw = SlidingWindow(20, n);
+            
+            for ii = 1:n
                 
-                f = obj.vehicleModel.compassFit;
-                obj.filteredData.heading = feval(f,compass);
-                
-            else
-                
-                gps = obj.path.GT.utm;                                         % Get Vehicle Location
-%                 gps = zeros(size(gps0));
-%                 
-%                 % Smooth out the GPS data to determin the true vehicle heading
-%                 n = size(gps0,1);
-%                 sw = SlidingWindow(20, n);
-%                 
-%                 for ii = 1:n
-%                     
-%                     data_ = gps0(sw.D1(ii),:);
-%                     gps1(ii,:) = mean(data_);
-%                     
-%                 end
-                
-                % Determin the true vehicl;e heading
-                dxdy = zeros(size(gps));
-                dxdy(1:end-1,:) = gps(2:end, :) - gps(1:end-1,:);
-                dxdy(end,:) = dxdy(end-1,:);
-                
-                oo = dxdy(:,1) == 0 & dxdy(:,2) == 0;
-                
-                angle = NaN(size(compass));
-                angle(~oo) = atan2(dxdy(~oo,2), dxdy(~oo,1)) * 180/pi;          % Deturmine true heading
-                
-                neg = angle < 0;                                                % Keep angles between 0 and 360
-                angle(neg) = angle(neg) + 360;
-                
-                angle = CompassAngle(angle, 'deg', 'deg');                      % Conver to compass angle
-                
-                
-                % Get Compass Error and compensate for rolle over
-                err = angle - compass;                                          % Compass Error
-                
-                for ii = find( abs(err) > 180)'
-                    
-                    if angle(ii) > 180
-                        angle(ii) = angle(ii) - 360;
-                    else
-                        angle(ii) = angle(ii) + 360;
-                        
-                    end
-                end
-                
-                err = angle - compass;                                          % Compass Error
-                
-                angle(isnan(angle)) = compass(isnan(angle));
-                
-                %             mu = nanmean(err);
-                sig = nanstd(err);
-                
-                obj.vehicleModel.compass = makedist('Normal','mu', 0,'sigma',sig);
-                obj.vehicleModel.units.compass = 'deg';
-                
-                c = compass(~isnan(angle));
-                a = angle(~isnan(angle));
-                
-                f = fit( c, a, modelType);
-                
-                y = feval(f,compass);
-                
-                obj.filteredData.heading = y;
-                
-                
-                if nargin == 3 && plotIO
-                    figure('name', sprintf("Compass Calibration for %s",obj.name), 'numbertitle', 'off');
-                    p1 = plot(angle, 'g');
-                    hold on
-                    p2 = plot(compass, 'b');
-                    p3 = plot(err, 'r');
-                    p4 = plot(y, 'm');
-                    hold off
-                    
-                    xlabel('Time Steps', 'FontSize', 14)
-                    ylabel('Compass Heading [deg]', 'FontSize', 14)
-                    title(sprintf("Compass Calibration for %s",obj.name), 'FontSize', 14)
-                    legend([p1,p2,p3,p4], {'gps','compass','errer','fit'}, 'FontSize', 12)
-                    drawnow
-                end
+                data_ = gps0(sw.D1(ii),:);
+                gps1(ii,:) = mean(data_);
                 
             end
+            
+            % Determin the true vehicl;e heading
+            dxdy = zeros(size(gps1));
+            dxdy(1:end-1,:) = gps1(2:end, :) - gps1(1:end-1,:);
+            dxdy(end,:) = dxdy(end-1,:);
+            
+            oo = dxdy(:,1) == 0 & dxdy(:,2) == 0;
+            
+            angle = NaN(size(compass));
+            angle(~oo) = atan2(dxdy(~oo,2), dxdy(~oo,1)) * 180/pi;          % Deturmine true heading
+            
+            neg = angle < 0;                                                % Keep angles between 0 and 360
+            angle(neg) = angle(neg) + 360; 
+
+            angle = CompassAngle(angle, 'deg', 'deg');                      % Conver to compass angle
+
+            
+            % Get Compass Error and compensate for rolle over
+            err = angle - compass;                                          % Compass Error
+
+            for ii = find( abs(err) > 180)'
+                
+                if angle(ii) > 180
+                    angle(ii) = angle(ii) - 360;
+                else
+                    angle(ii) = angle(ii) + 360;
+                    
+                end
+            end
+                    
+            err = angle - compass;                                          % Compass Error
+ 
+            angle(isnan(angle)) = compass(isnan(angle));
+            
+%             mu = nanmean(err);
+%             sig = nanstd(err);
+            
+            obj.vehicleModel.compass = makedist('Normal','mu', 0,'sigma',20);
+            obj.vehicleModel.units.compass = 'deg';
+            
+            c = compass(~isnan(angle));
+            a = angle(~isnan(angle));
+            
+            f = fit( c, a, modelType);            
+            
+            y = feval(f,compass);
+            
+            obj.filteredData.heading = y;
+            
+            
+            if nargin == 3 && plotIO
+                figure('name', sprintf("Compass Calibration for %s",obj.name), 'numbertitle', 'off');
+                p1 = plot(angle, 'g');
+                hold on
+                p2 = plot(compass, 'b');
+                p3 = plot(err, 'r');
+                p4 = plot(y, 'm');
+                hold off
+                
+                xlabel('Time Steps', 'FontSize', 14)
+                ylabel('Compass Heading [deg]', 'FontSize', 14)
+                title(sprintf("Compass Calibration for %s",obj.name), 'FontSize', 14)
+                legend([p1,p2,p3,p4], {'gps','compass','errer','fit'}, 'FontSize', 12)
+                drawnow
+            end
+            
         end
-        
-        
+            
+            
         
         % Select data from an indivual mission
         function obj = Select_Mission(obj, idx)
@@ -774,7 +675,7 @@ classdef Riptide_Data
             
             % Get Rid of old models
             obj.filteredData = [];
-%             obj.vehicleModel = [];
+            obj.vehicleModel = [];
             
             mission    = obj.manifest.Mission(idx);
             start_time = obj.manifest.('Start Time')(idx);
@@ -811,11 +712,7 @@ classdef Riptide_Data
                             obj.(type{2})(bb).(mems{1}) = obj.(type{1})(bb).(mems{1});
                         else                                                                            % Choose individual data that are associated witht he mission
                             data_ = obj.(type{1})(bb).(mems{1});
-                            try
                             obj.(type{2})(bb).(mems{1}) = data_(in,:);
-                            catch E
-                                disp(E)
-                            end
                         end
                         
                     end
@@ -828,142 +725,6 @@ classdef Riptide_Data
         
         end
         
-        
-        
-        function obj = VehicleModeling(obj, modelType, bathy, skip)
-            
-            a_     = zeros(10000,1);
-            c_     = zeros(10000,1);
-            err_   = zeros(10000,1);
-            speed_ = zeros(10000,1);
-            altEr_ = zeros(10000,1);
-            
-            a = 1;
-            for ii = 1:size(obj.manifest,1)
-   
-                if nargin == 4 && ii == skip, continue, end
-                
-                
-                obj = obj.Select_Mission(ii);                               % Get Mission
-                obj = obj.Get_VehiclePaths;                                 % Get smoothed GPS path
-                obj = obj.Model_Altimiter;                                  % Model altimiter
-                
-                % --- Model Vehicle Speed ---------------------------------
-                speed     = obj.data(1).attitude(:,5);
-                compass   = obj.data(1).attitude(:,3);                        % Comapss heading
-                timestamp = obj.data(1).timeStamp;
-                alt       = obj.filteredData.altitude;
-                utm       = obj.path.GT.utm;
-                
-                
-                % filter out times where the vehicle is not moving
-                out = speed == 0;
-                timestamp(out) = [];
-                compass(out)   = [];
-                utm(out,:)     = [];
-                alt(out,:)     = [];
-                
-                % Calculate the actual speed of the vehicle
-                timestep = seconds( timestamp(2:end) - timestamp(1: end-1) );
-                dists    = vecnorm( utm(2:end,:) - utm(1:end-1,:) , 2, 2 );
-                
-                b = a+ numel(dists) -1;
-                
-                speed_(a:b) = dists./timestep;
-                
-                
-                % --- Model Vehicle Compass -------------------------------
-                % Determin the true vehicle heading
-                dxdy = utm(2:end,:) - utm(1:end-1,:);
-                compass(end)   = [];
-                
-%                 if any(dxdy == 0), warning("0s in dx -dy"), end
-
-                
-                
-                angle = atan2(dxdy(:,2), dxdy(:,1)) * 180/pi;               % Deturmine true heading
-                
-                neg = angle < 0;                                            % Keep angles between 0 and 360
-                angle(neg) = angle(neg) + 360;
-                
-                angle = CompassAngle(angle, 'deg', 'deg');                  % Conver to compass angle
-                
-                err = angle - compass;                                      % Compass Error
-                
-                for jj = find( abs(err) > 180)'                             % Correct for rolle over
-                    
-                    if angle(jj) > 180
-                        angle(jj) = angle(jj) - 360;
-                    else
-                        angle(jj) = angle(jj) + 360;
-                    end
-                end
-                
-                a_(a:b)   = angle(~isnan(angle));
-                c_(a:b)   = compass(~isnan(angle));
-                err_(a:b) = angle - compass;                                % Compass Error
-                
-                
-                % --- Modle Altimiter -------------------------------------
-                gtAlt = bathy.Depth(utm);
-                
-                gtAlt(end) = [];
-                alt(end)   = [];
-                
-                alt(alt == 0) = NaN;
-                
-                altEr_(a:b) = gtAlt - alt;
-                
-                
-                
-                a = b+1;
-                
-            end
-            
-            
-            % Get Rid of extra entries
-            a_(a:end)     = [];
-            c_(a:end)     = [];
-            err_(a:end)   = [];
-            speed_(a:end) = [];
-            
-            % Get rid of zerso
-            a_(a_ == 0) = [];
-            c_(c_ == 0) = [];
-            err_(err_ == 0)   = [];
-            speed_(speed_ == 0) = [];
-            
-            
-            % Speed Model
-            mu  = mean(speed_);
-            sig = std(speed_);
-           
-            obj.vehicleModel.speed       = makedist('Normal', 'mu', 0, 'sigma', sig);
-            obj.vehicleModel.units.speed = "m/s";
-            
-            obj.vehicleModel.speedFit = mu;
-            
-            
-            % Compass model
-%             mu = nanmean(err);
-            sig = nanstd(err_);
-            
-            obj.vehicleModel.compass = makedist('Normal','mu', 0,'sigma',sig);
-            obj.vehicleModel.units.compass = 'deg';
-            
-            obj.vehicleModel.compassFit = fit( c_, a_, modelType);
-            
-            
-            % Altimiter Model
-            mu  = nanmean( altEr_ );
-            sig = nanstd( altEr_ );
-            
-            obj.vehicleModel.altimeter = makedist('Normal','mu', 0,'sigma',sig);
-            obj.vehicleModel.units.altimeter = "m";
-            
-            obj.vehicleModel.altFit = mu;
-            
-        end
         
         
         function [pf, path, name_, r, speed, speedNoise, compassNoise] = VehicleInfo(obj, name_)
@@ -1029,19 +790,6 @@ classdef Riptide_Data
             
             hold on
             
-            
-            if ismember('EKF', mem)
-            
-                xx = obj.path.EKF.utm(:,1);
-                yy = obj.path.EKF.utm(:,2);
-                zone = obj.path.GT.utmzone(1,:);
-                
-                
-                [lat, lon] = utm2deg(xx,yy, repmat(zone, size(xx,1),1) );
-                
-                obj.path.EKF.lat_lon = [lat, lon];
-                
-            end
             
             for ii = numel(mem): -1: 1
                 
@@ -1181,43 +929,26 @@ classdef Riptide_Data
                 alt = obj.data(1).attitude(:,4);
             end
             
-%             if nargin == 2
-%                 figure(fig)
-%                 hold on
-%             else
-%                 fig = figure('name',sprintf('%s Altimeter Measurments',obj.name), 'numbertitle', 'off');
-%             end
-%             
-%             if numel(times) == numel(alt)
-%                 plot(times, alt)
-%             else
-%                 warning("Plot_Altitude --> Times and Alt are different sizes")
-%                 plot(alt)
-%             end
-%             
-%             title(sprintf('%s: Atitude vs Time', obj.name), 'FontSize', 14)
-%             xlabel('Date-Time', 'FontSize', 14)
-%             ylabel('Atitude [m]', 'FontSize', 14)
-%             legend('FontSize', 12)
-%             drawnow
-            
-
-                alt(alt == 0) = NaN;
-                
-                fig = figure('name', sprintf('%s Altimiter Profiles', obj.name));
-                p1 = plot(alt, '.');
+            if nargin == 2
+                figure(fig)
                 hold on
-                p2 = plot(obj.orical.gtAlt);
-                p3 = plot(obj.orical.drAlt);
-                hold off
-                
-                xlabel('Time Step')
-                ylabel('Altitude [m]')
-                title( sprintf('%s Altimiter Profile', obj.name) )
-                legend([p1,p2, p3], {'Filtered Alt', 'GT Bathy Profile', 'DR Bathy Profile'} )
-                drawnow
-                
-                
+            else
+                fig = figure('name',sprintf('%s Altimeter Measurments',obj.name), 'numbertitle', 'off');
+            end
+            
+            if numel(times) == numel(alt)
+                plot(times, alt)
+            else
+                warning("Plot_Altitude --> Times and Alt are different sizes")
+                plot(alt)
+            end
+            
+            title(sprintf('%s: Atitude vs Time', obj.name), 'FontSize', 14)
+            xlabel('Date-Time', 'FontSize', 14)
+            ylabel('Atitude [m]', 'FontSize', 14)
+            legend('FontSize', 12)
+            drawnow
+            
             if nargout == 1
                 figOut = fig;
             end
@@ -1319,49 +1050,9 @@ classdef Riptide_Data
         end
         
         
-    end
-    
-    
-    methods (Access = private)
-        
-        % Calculate Speed and Heading Error
-        function[errTheta, errSpeed] = GetVelocityErrors(gpsX, gpsY, speed, heading, timestamp)
-            
-            % Get Path from Speed and heading
-            timeStep = seconds(timestamp(2:end) - timestamp(1: end-1));
-            
-            deltaX_dr = [0; speed(1:end-1) .* timeStep .* sin( heading(1:end-1) )];
-            deltaY_dr = [0; speed(1:end-1) .* timeStep .* cos( heading(1:end-1) )];
-            
-            deltaX_gps = [0; gpsX(2:end) - gpsX(1:end-1)];
-            deltaY_gps = [0; gpsY(2:end) - gpsY(1:end-1)];
-            
-            % Error between deadreckoning and GPS
-            errX = deltaX_dr - deltaX_gps;
-            errY = deltaY_dr - deltaY_gps;
-            
-            
-            % Deturmin uncertainties ---------------------------------------------------------------------
-            sigtrig = sin(heading).^2 - cos(heading).^2;
-            
-            sigX_dX = errX ./ deltaX_dr;
-            sigY_dY = errY ./ deltaY_dr;
-            
-            errTheta = abs(heading) .* sqrt( abs((sigY_dY .* sigY_dY  - sigX_dX .* sigX_dX) ./ sigtrig ));
-            errSpeed = abs(speed)   .* sqrt( abs((tan(heading ).^2 .*  sigX_dX .^2 - sigY_dY.^2) ./ ( tan(heading ).^2 - 1)));
-            
-            errTheta(isinf(errTheta)) = [];
-            errSpeed(isinf(errSpeed)) = [];
-            
-            errTheta = nanmean(errTheta);
-            errSpeed = nanmean(errSpeed);
-            
-            fprintf("\n\nTheta Err: %f\tSpeed Err: %f\n\n",errTheta, errSpeed)
-            
-        end
         
         
-        % Plotting Template
+        
         function figOut = Plot_Template(obj, fig_)
             
             
@@ -1405,6 +1096,46 @@ classdef Riptide_Data
             
         end
         
+    end
+    
+    
+    methods (Access = private)
+        
+        % Calculate Speed and Heading Error
+        function[errTheta, errSpeed] = GetVelocityErrors(gpsX, gpsY, speed, heading, timestamp)
+            
+            % Get Path from Speed and heading
+            timeStep = seconds(timestamp(2:end) - timestamp(1: end-1));
+            
+            deltaX_dr = [0; speed(1:end-1) .* timeStep .* sin( heading(1:end-1) )];
+            deltaY_dr = [0; speed(1:end-1) .* timeStep .* cos( heading(1:end-1) )];
+            
+            deltaX_gps = [0; gpsX(2:end) - gpsX(1:end-1)];
+            deltaY_gps = [0; gpsY(2:end) - gpsY(1:end-1)];
+            
+            % Error between deadreckoning and GPS
+            errX = deltaX_dr - deltaX_gps;
+            errY = deltaY_dr - deltaY_gps;
+            
+            
+            % Deturmin uncertainties ---------------------------------------------------------------------
+            sigtrig = sin(heading).^2 - cos(heading).^2;
+            
+            sigX_dX = errX ./ deltaX_dr;
+            sigY_dY = errY ./ deltaY_dr;
+            
+            errTheta = abs(heading) .* sqrt( abs((sigY_dY .* sigY_dY  - sigX_dX .* sigX_dX) ./ sigtrig ));
+            errSpeed = abs(speed)   .* sqrt( abs((tan(heading ).^2 .*  sigX_dX .^2 - sigY_dY.^2) ./ ( tan(heading ).^2 - 1)));
+            
+            errTheta(isinf(errTheta)) = [];
+            errSpeed(isinf(errSpeed)) = [];
+            
+            errTheta = nanmean(errTheta);
+            errSpeed = nanmean(errSpeed);
+            
+            fprintf("\n\nTheta Err: %f\tSpeed Err: %f\n\n",errTheta, errSpeed)
+            
+        end
         
     end
 end

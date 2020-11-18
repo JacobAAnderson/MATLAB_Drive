@@ -87,7 +87,7 @@ classdef Bathymetry_Map
             if nargin < 3
                 res       =   1.0;  % Grid cell width
                 %                 baseFloor = -60;    % Floor of the map --> This will defalt to the minimum data value if the argument is not passed into the Bathymetry function.
-                window    =  40;    % Window size of EKF
+                window    =  30;    % Window size of EKF
                 sig       =   2;    % Sigma threshold for low pass filter
             else
                 res       = filterSpecs(1);

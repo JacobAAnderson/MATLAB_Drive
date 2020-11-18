@@ -6,7 +6,7 @@
 
 
 
-function [tbnPaths, sim_times] = Riptide_TBN_Sim(RT, timeLine, sos, mu, dec_tbn)
+function [tbnPaths, sim_times, RT] = Riptide_TBN_Sim(RT, timeLine, sos, mu, dec_tbn)
 
 dtfs = DateTime_Funs;                                                       % Date Time Functions
 
@@ -45,10 +45,14 @@ for time = timeLine'                                                        % Ru
                     dt      =  RT(v).data.timeStep(in);                     % Get time step
                     speed   =  RT(v).filteredData.speed(in);                % Use the filtered speed, heading and altitude 
                     heading =  RT(v).filteredData.heading(in);
-                    alt     = -RT(v).filteredData.altitude(in);
+                    
+%                     [alt, RT(v)] = RT(v).Filter_Altimiter(in);
+%                     alt = -alt;
+                    
+                    alt     = -RT(v).filteredData.altitude(in);             % Use Filtered Data
 %                     alt     = -RT(v).orical.alt(in);                        % Feed in perfect Altimiter readings
                      
-                    if alt == 0                                             % Check for valid altimiter readings
+                    if alt == 0 || isnan(alt)                               % Check for valid altimiter readings
                         RT(v).tbn = RT(v).tbn.Update(speed, dt, heading);
                     else
                         RT(v).tbn = RT(v).tbn.Update(speed, dt, heading, alt);

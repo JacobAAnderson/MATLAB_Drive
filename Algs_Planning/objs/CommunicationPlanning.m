@@ -368,17 +368,31 @@ classdef CommunicationPlanning
             policy = G.Nodes.action(P(1,:));                                     % Get Communications Policy
             
             figure('name',obj.name)
-            subplot(3,1,1)
-            plot(G.Nodes.time(P(1,:)))
-            subplot(3,1,2)
+%             subplot(3,1,1)
+%             plot(G.Nodes.time(P(1,:)))
+            subplot(2,1,1)
             plot(policy)
-            subplot(3,1,3)
+            hold on
+            
+            p_ = double(policy);
+            p_(p_==0) = NaN;
+            plot(p_, '*')
+            title( sprintf('%s Communication Policy',obj.name))
+            xlabel('Time Steps [30 sec]')
+            ylabel('Communicate [true/false]')
+            
+            
+            subplot(2,1,2)
             p0 = plot(error_base(1:t));
             hold on
             p1 = plot(error_max(1:t));
             p2 = plot(error_min(1:t));
             p3 = plot(error_thresh(1:t));
             hold off
+            title('Expected Error from Simulations')
+            xlabel('Time Steps [30 sec]')
+            ylabel('Error [m]')
+            
             legend([p0,p1,p2,p3], {'Base','max','Min','thresh'},'Location','northwest')
             drawnow
             
