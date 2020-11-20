@@ -57,6 +57,49 @@ classdef Riptide_Data
         end
         
         
+        function obj = Add_CommsPloicy(obj, name,  policy, dt)
+            
+            acommsTimes = obj.acomms.recived_msg;
+            
+            obj.acomms.policy.(name) = false( size(acommsTimes) );
+            
+            % -- Policy is a datetime array --
+            if isa( policy, 'datetime')
+                
+                threshole = seconds(dt);
+                
+                for time = policy
+                    
+                    dt = abs(time - acommsTimes);
+                    
+                    idx = dt <= threshole & dt == min(dt);
+                   
+                    obj.acomms.policy.(name)(idx) = true;
+                   
+               end
+                
+                
+            % -- Policy is a boolean array -- 
+            elseif isa( policy, 'logical')
+                
+                if numel(policy) == 1
+                    obj.acomms.policy.(name)(:) = policy;
+                    
+                else 
+                    obj.acomms.policy.(name) = policy;
+                    
+                end
+            
+            % -- Policy is the wrong data type --
+            else
+                warning("Communication Policy is of an un-accepted type")
+                disp('Communications palicy is false')
+                
+            end
+           
+        end
+        
+        
         function obj = Add_OWTOF(obj, owtof)
             dtfs = DateTime_Funs;
             
@@ -198,14 +241,19 @@ classdef Riptide_Data
         
         
         % Provide the vehicle with a particle filter for Terrain Based Navigation annalisys
-        function obj = Add_TBN(obj, map)
+        function obj = Add_TBN(obj, map, didel)
+            
+            if nargin == 2
+                didel = 1;
+            end
             
             obj.tbn = DEC_TBN(obj.name, 1000 );                              % Instanciate Paricle Filter
             
             obj.tbn = obj.tbn.Add_Map(map);                                   % Provide Bathymetry map
             obj.tbn = obj.tbn.SetLocation(obj.path.GT.utm(1,:), [3,0;0,3]);   % Tell it where the vehicle is starting from
             
- 
+            disp(obj.name)
+            
             % --- Set vehicle transiton model as a probability distribuition ( "type of distribuition' , mu, sigma ) ---
             for prop = {'acoms',  'altimeter', 'compass' 'speed';           % --> Type of noise
                         'Normal', 'Normal',    'Normal', 'Normal';          % --> Default distribion type
@@ -213,15 +261,19 @@ classdef Riptide_Data
                          0.5,      2.5,         30,       2.0}              % --> Default sigma
                      
                      
-                     if  isfield( obj.vehicleModel, prop{1} )
-                         mu     = obj.vehicleModel.(prop{1}).mu;
-                         sig    = obj.vehicleModel.(prop{1}).sigma;
-                         name_  = obj.vehicleModel.(prop{1}).DistributionName;
-                         obj.tbn = obj.tbn.SetNoise(prop{1}, name_, mu, sig);
-                         
-                     else
-                         obj.tbn = obj.tbn.SetNoise(prop{1}, prop{2}, prop{3}, prop{4});
-                     end
+%                      if  isfield( obj.vehicleModel, prop{1} )
+%                          mu     = didel * obj.vehicleModel.(prop{1}).mu;
+%                          sig    = didel * obj.vehicleModel.(prop{1}).sigma;
+%                          name_  = obj.vehicleModel.(prop{1}).DistributionName;
+%                          obj.tbn = obj.tbn.SetNoise(prop{1}, name_, mu, sig);
+%                          
+%                          fprintf("%s: mu: %f,  sig: %f\n", prop{1}, mu, sig)
+%                          
+%                      else
+%                          obj.tbn = obj.tbn.SetNoise(prop{1}, prop{2}, prop{3}, prop{4});
+%                      end
+                     
+                     obj.tbn = obj.tbn.SetNoise(prop{1}, prop{2}, prop{3}, prop{4});
                      
             end
            
@@ -588,7 +640,20 @@ classdef Riptide_Data
                 mapAlt = [16, 0];
             end
             
-            alt = obj.data(1).attitude(:,4);
+            alt = abs( obj.data.bathymetry(:,3));
+            
+            lat_lon = obj.data.bathymetry(:,1:2);
+            
+            [xx,yy] = deg2utm(lat_lon(:,1), lat_lon(:,2));
+            
+            dx = xx - obj.path.GT.utm(:,1);
+            dy = yy - obj.path.GT.utm(:,2);
+            
+            obj.filteredData.alt_offset = [dx,dy];
+            
+%             alt = obj.data(1).attitude(:,4);
+            alt_raw = alt;
+
             
 %             if size(alt) ~= size(mapAlt) && numel(mapAlt) ~= 2
 %                 warning('Altimiter profile and bathymetric profile are diferent sizes')
@@ -596,18 +661,20 @@ classdef Riptide_Data
             
             
             out = alt > max(mapAlt(:)) | ...
-                alt < min(mapAlt(:)) | ...
+                alt < 0 | ... min(mapAlt(:)) | ...
                 alt == 0;
             
             sig_ = nanstd(alt(~out));
             alt(out) = 0;
+            
+%             alt_raw(out) = NaN;
             
             sig = sig_;
             x   = alt(1);
             for ii = 1:numel(alt)
                 
                 if alt(ii) == 0
-                    sig = 2 * sig_;
+                    sig = sig * 1.1;
                     continue
                 end
                 
@@ -632,7 +699,7 @@ classdef Riptide_Data
             
             if isfield(obj.vehicleModel, 'altFit')                          % if the vehicle has been modeled than use that modle to correct the altimiter
                 
-                alt(alt > 0) = alt(alt > 0) + obj.vehicleModel.altFit;
+%                 alt(alt > 0) = alt(alt > 0) + obj.vehicleModel.altFit;
                 
             else
                 
@@ -651,15 +718,15 @@ classdef Riptide_Data
                 alt(alt == 0) = NaN;
                 
                 figure('name', sprintf('%s Altimiter Profiles', obj.name))
-                p1 = plot(alt);
+                p1 = plot(alt_raw);
                 hold on
-                p2 = plot(obj.orical.gtAlt);
+                p2 = plot(alt); % obj.orical.gtAlt);
                 hold off
                 
                 xlabel('Time Step')
                 ylabel('Altitude [m]')
                 title( sprintf('%s Altimiter Profile', obj.name) )
-                legend([p1,p2], {'Filtered Alt', 'GT Bathy Profile'} )  %, 'DR Bathy Profile'
+                legend([p1,p2], {'Raw Altimeter Data', 'Filtered Altimiter Data'}) % GT Bathy Profile'} )  %, 'DR Bathy Profile'
             end
             
         end
@@ -829,6 +896,44 @@ classdef Riptide_Data
         end
         
         
+        function [pf, path, name_, r, speed, speedNoise, compassNoise] = VehicleInfo(obj, name_)
+            
+            if nargin == 1
+                name_ = obj.name;
+            end
+            
+            pf = obj.tbn;
+            r  = 3;
+            
+            speed = obj.filteredData.speed(1);
+            
+            speedNoise   = obj.vehicleModel.speed;
+            compassNoise = obj.vehicleModel.compass;
+            
+            path = fliplr(obj.course.waypoints);
+            
+            trueStart = obj.path.GT.lat_lon(1,:);
+            
+            dxdy = path(1,:) - trueStart;
+            
+            path = path - dxdy;
+            
+            
+            [xx, yy] = deg2utm( path(:,1), path(:,2) );
+            
+            path = [xx,yy];
+            
+            
+            % Pack the information into a cell array so that we can nest this function call inside another function call
+            if nargout == 1
+            
+                pf = {pf, path, name_, r, speed, speedNoise, compassNoise};
+                
+            end
+            
+            
+        end
+        
         
         function obj = VehicleModeling(obj, modelType, bathy, skip)
             
@@ -951,7 +1056,8 @@ classdef Riptide_Data
             obj.vehicleModel.compass = makedist('Normal','mu', 0,'sigma',sig);
             obj.vehicleModel.units.compass = 'deg';
             
-            obj.vehicleModel.compassFit = fit( c_, a_, modelType);
+            obj.vehicleModel.compassFit     = fit( c_, a_, modelType);
+            obj.vehicleModel.compassFit_inv = fit( a_, c_, modelType);
             
             
             % Altimiter Model
@@ -964,47 +1070,7 @@ classdef Riptide_Data
             obj.vehicleModel.altFit = mu;
             
         end
-        
-        
-        function [pf, path, name_, r, speed, speedNoise, compassNoise] = VehicleInfo(obj, name_)
-            
-            if nargin == 1
-                name_ = obj.name;
-            end
-            
-            pf = obj.tbn;
-            r  = 3;
-            
-            speed = obj.filteredData.speed(1);
-            
-            speedNoise   = obj.vehicleModel.speed;
-            compassNoise = obj.vehicleModel.compass;
-            
-            path = fliplr(obj.course.waypoints);
-            
-            trueStart = obj.path.GT.lat_lon(1,:);
-            
-            dxdy = path(1,:) - trueStart;
-            
-            path = path - dxdy;
-            
-            
-            [xx, yy] = deg2utm( path(:,1), path(:,2) );
-            
-            path = [xx,yy];
-            
-            
-            % Pack the information into a cell array so that we can nest this function call inside another function call
-            if nargout == 1
-            
-                pf = {pf, path, name_, r, speed, speedNoise, compassNoise};
-                
-            end
-            
-            
-        end
-        
-        
+         
         
         % _____ Plotting __________________________________________________________________________
         function figOut = Plot_Paths(obj, fig_, paths, c)

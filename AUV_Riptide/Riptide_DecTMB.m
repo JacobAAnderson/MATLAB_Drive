@@ -9,7 +9,11 @@ close all
 clear all
 clc
 
-dtfs   = DateTime_Funs;                                                     % Date Time Functions
+ui = SavedUserInputs(mfilename);                                            % Instantiate the Saved User Inputs Class
+ui = ui.NewData(false);                                                     % Indicate whether new data should be selescted by the user
+
+
+dtfs   = DateTime_Funs;                                                     % Dathlkhklhe Time Functions
 rtAcms = Riptide_Acomms;                                                    % Joint Riptide functions
 sos    = 1475;                                                              % Speed of sound in water [m/s];
 
@@ -17,21 +21,17 @@ timeLine_mission = [];                                                      % Ke
 
 
 %% Get Data
-ui = SavedUserInputs(mfilename);                                            % Instantiate the Saved User Inputs Class
-ui = ui.NewData(false);                                                     % Indicate whether new data should be selescted by the user
-
 filters = {'GPS_fix', 0};                                                   % Data filter {"Data_Field", value to be filterred out}
 %            'ALT_ALTITUDE', 0};        
 
 [RT, geotiff, bathy] = GetRiptides(ui, 2, {'Dory','Nemo'}, filters);        % Choose data files with gui and return data structure
 
 
-
 % Sort Riptide_Acomms
-[~, ~, owtof] = rtAcms.Model_AcommsLatency( RT );                            % Model the latency in acoustic communications and get one way time of flight
+[~, ~, owtof] = rtAcms.Model_AcommsLatency( RT );                           % Model the latency in acoustic communications and get one way time of flight
 
 for v = 1:numel(RT)
-    RT(v) = RT(v).Add_OWTOF(owtof);
+    RT(v) = RT(v).Add_OWTOF(owtof);                                         % Add one way time of fligth 
     RT(v) = RT(v).Get_Manifest("skipidel", "alt & acomms");
     
     RT(v).commsPlanner = CommunicationPlanning(RT(v).name);
@@ -66,14 +66,22 @@ load('/Users/jake/_OutPuts/RT_FostersLake.mat')
 % missions = [11,12];         % Fosters Lake Mission Set:CircumNav2_B, CircumNave2_A    --> Decent Acomms
 % missions = [14,15];         % * Fosters Lake Mission Set:ZZ1, ZZ2                       --> Decent Acomms
 % missions = [15,16];         % Fosters Lake Mission Set:Dimond1_A, Dimond1_B  (DEC-TBN Does better)
- missions = [16,17];         % * Fosters Lake Mission Set:ZZ4_B, ZZ4_A  
+% missions = [16,17];         % * Fosters Lake Mission Set:ZZ4_B, ZZ4_A  
 
+ 
+ % ------ 2020-10-27 ----------------
+% missions = [1,1];         % Fosters Lake Mission Set:CircumNav2_B, CircumNave2_A    --> Decent Acomms
+ missions = [3,3];         % *! Fosters Lake Mission Set:Dimond1_A, Dimond1_B          --> Good TBN
+% missions = [4,4];         % Fosters Lake Mission Set:ZZ1, ZZ2                       --> Decent Acomms
+% missions = [5,5];         % *! Fosters Lake Mission Set:Dimond1_A, Dimond1_B  (DEC-TBN Does better)
+% missions = [6,6];         % *! Fosters Lake Mission Set:ZZ4_B, ZZ4_A  
+ 
 
 % fig1 = geotiff.Show;                                                      % Show geotiff for plotting paths
 
 for v = 1: numel(RT)
     
-    RT(v) = RT(v).VehicleModeling('poly2', bathy, missions(v));                    % Do vehicle modeling that excludes data from the selected mission
+    RT(v) = RT(v).VehicleModeling('poly2', bathy, missions(v));             % Do vehicle modeling that excludes data from the selected mission
     
     % -- Select mission --
     RT(v) = RT(v).Select_Mission( missions(v) );                            % Choose Mission
@@ -85,9 +93,13 @@ for v = 1: numel(RT)
     RT(v) = RT(v).Get_VehiclePaths;                                         % Evaluate GT and Corrected DR paths from the speed and compass models
     
     % -- Terrain Based Navigation stuff --
-    RT(v) = RT(v).Add_TBN(bathy);                                           % Prep Particle filters
-    RT(v) = RT(v).Model_Altimiter(true);                                    % Filter Altimiter data and build normal distribution
+    RT(v) = RT(v).Add_TBN(bathy, 1);                                        % Prep Particle filters
+    RT(v) = RT(v).Model_Altimiter(false);                                    % Filter Altimiter data and build normal distribution
    
+    % -- Generic DEC-TBN Policies ---
+    RT(v) = RT(v).Add_CommsPloicy( 'tbn', false);
+    RT(v) = RT(v).Add_CommsPloicy( 'full', true);
+    
     % -- Plot/display Stuff --
     RT(v).Disp_Manifest;                                                    % Display Vehicle Manifest
 %     fig1 = RT(v).Plot_Paths(fig1);                                        % Show paths on a geotiff
@@ -106,7 +118,7 @@ for v = 1:numel(RT)                                                         % Se
     RT(v).tbn = RT(v).tbn.SetNoise('acoms',  'Normal', m, s * 1.5);         % Set acoustic modem error Distributions
 end
 
-% rtAcms.Plot_AcousticCommunications(RT, geotiff);                            % Plot Acoustic Communications
+% rtAcms.Plot_AcousticCommunications(RT, geotiff);                          % Plot Acoustic Communications
 
 clear v m s
 
@@ -120,9 +132,9 @@ if ~isequal( timeLine_mission, missions)
 
     timeLine_mission = missions;
     timeLine = [RT(1).data.gpsDate;
-        RT(1).acomms.gpsDate;
-        RT(2).data.gpsDate;
-        RT(2).acomms.gpsDate];
+                RT(1).acomms.gpsDate;
+                RT(2).data.gpsDate;
+                RT(2).acomms.gpsDate];
     
     timeLine = sort(dtfs.Unique(timeLine));
     fprintf("Time Line finished\nElapsed time: %.1f [sec]\n\n", toc)
@@ -130,44 +142,48 @@ end
 
 
 
-% Communication planning
+% -- Communication planning --
 % clc
 % close all
 % 
-% for ii = [1: numel(RT); numel(RT):-1:1], v = ii(1); s = ii(2);
-% 
-%     RT(v) = RT(v).Add_CommsPlanner;                                                     % Instanciate communications planner
-%     
-%     RT(v).commsPlanner = RT(v).commsPlanner.Add_Vehicle(RT(v).VehicleInfo('self'));     % Load vehicle info into the planner
-%     RT(v).commsPlanner = RT(v).commsPlanner.Add_Vehicle(RT(s).VehicleInfo);
-%    
-% end
-% 
-% 
-% coms_times = RT(1).acomms.gpsDate;
-% 
-% dt = seconds(mean ( coms_times(2:end) - coms_times(1:end-1) ));
-% 
-% sz = numel(coms_times);
-% 
-% for v = 1: numel(RT)
-%     fprintf('Comms Planning for %s\n', RT(v).name)
-%     
-%     missionDuration =  RT(v).data.timeStamp(end) - RT(v).data.timeStamp(1);
-%     
-%     sz = floor(missionDuration / dt);
-%     
-%     RT(v).acomms.policy = RT(v).commsPlanner.Plan1(sz, dt, 1.25, false);
-%     
-% end
-% 
-% 
-% clear ii v s
+for ii = [1: numel(RT); numel(RT):-1:1], v = ii(1); s = ii(2);
+
+    RT(v) = RT(v).Add_CommsPlanner;                                                     % Instanciate communications planner
+    
+    RT(v).commsPlanner = RT(v).commsPlanner.Add_Vehicle(RT(v).VehicleInfo('self'));     % Load vehicle info into the planner
+    RT(v).commsPlanner = RT(v).commsPlanner.Add_Vehicle(RT(s).VehicleInfo);
+   
+end
+
+
+
+dt = 30;                % Time step in seconds
+dt_ = seconds(dt);      % time Step as a duration type
+
+for ii = [1: numel(RT); numel(RT): -1: 1], v = ii(1); s = ii(2);
+    
+    fprintf('Comms Planning for %s\n', RT(v).name)
+    
+    start = RT(v).data.timeStamp(1);
+    stop  = RT(v).data.timeStamp(end);
+    
+    sz = floor( (stop - start)/ dt_ );
+    
+    policy = [false; RT(v).commsPlanner.Plan2(sz, dt, 1.25, false)];        % Generate the policy and append a false to the front since it the planing starts at t = 2
+    
+    policyTimes = start: dt_: stop;
+    
+    RT(s) = RT(s).Add_CommsPloicy('plan', policyTimes(policy), dt);        % Tell the other vehicle which communications it can use
+    
+end
+
+
+clear ii v s
 
 
 % _____ Do TBN _____________________
-clc
-close all
+%clc
+%close all
  
 num_trials = 1;
 
@@ -177,41 +193,37 @@ types = {'Dory_Error', 'Nemo_Error', 'Joint_Error', 'Time'};
 
 [rAd, gtPaths] = GetRAD(RT, paths, types, num_trials, timeLine);            % Create rAd with DR Correctd data entered
 
-RT = RT_;
+% RT = RT_;
 
 
-% for prop = { 'altimeter', 'compass' 'speed';           % --> Type of noise
-%              'Normal',    'Normal', 'Normal';          % --> Default distribion type
-%               0,           0,        0;                % --> Default mu
-%               2.5,         30,       2.0;              % --> Sigma for Dory
-%               2.5,         30,       2.0}              % --> Sigma for Nemo
-%     
-% 
-%         RT(1).tbn = RT(1).tbn.SetNoise(prop{1}, prop{2}, prop{3}, prop{4});
-%         RT(2).tbn = RT(2).tbn.SetNoise(prop{1}, prop{2}, prop{3}, prop{5});
-% 
-% end
+for prop = { 'altimeter', 'compass' 'speed';           % --> Type of noise
+             'Normal',    'Normal', 'Normal';          % --> Default distribion type
+              0,           0,        0;                % --> Default mu
+              2.5,         30,       2.0;              % --> Sigma for Dory
+              2.5,         30,       2.0}              % --> Sigma for Nemo
+    
+
+        RT(1).tbn = RT(1).tbn.SetNoise(prop{1}, prop{2}, prop{3}, prop{4});
+        RT(2).tbn = RT(2).tbn.SetNoise(prop{1}, prop{2}, prop{3}, prop{5});
+
+end
 
 
 
 % --- TBN Simulation ---
-for dec_tbn = [false, true]                                                 % Switch between TBN and DEC-TBN
+for dec_tbn = {'tbn', 'full', 'plan'}                                       % Switch between TBN and DEC-TBN
     for iter = 1: num_trials
         
-        [tbnPaths, sim_times, ~] = Riptide_TBN_Sim(RT, timeLine, sos, mu, dec_tbn);    % Do TBN / DEC-TBN simulation
+        [tbnPaths, sim_times, ~] = Riptide_TBN_Sim(RT, timeLine, sos, mu, dec_tbn{1});    % Do TBN / DEC-TBN simulation
         
-        rAd = TallyPathData(rAd, iter, paths(2:3), gtPaths, tbnPaths, sim_times, timeLine, dec_tbn);     % Calculate path errors and add to rAd
+        rAd = TallyPathData(rAd, iter, dec_tbn{1}, gtPaths, tbnPaths, sim_times, timeLine);     % Calculate path errors and add to rAd
         
         
         if iter == num_trials
             
             for v = 1: numel(RT)
                 
-                if dec_tbn
-                    RT(v) = RT(v).Add_Path(tbnPaths(:,:,v), "DEC_TBN", 'utm');
-                else        
-                    RT(v) = RT(v).Add_Path(tbnPaths(:,:,v), "TBN",     'utm');
-                end
+                RT(v) = RT(v).Add_Path(tbnPaths(:,:,v), dec_tbn{1}, 'utm');
                 
             end
         end

@@ -12,6 +12,8 @@ dtfs = DateTime_Funs;                                                       % Da
 
 count = [0,0];                                                              % Count number of Acoustic communications
 
+comms_count = [0,0];
+
 sim_times = NaT( size(timeLine,1), 2);
 
 
@@ -46,18 +48,17 @@ for time = timeLine'                                                        % Ru
                     speed   =  RT(v).filteredData.speed(in);                % Use the filtered speed, heading and altitude 
                     heading =  RT(v).filteredData.heading(in);
                     
-%                     [alt, RT(v)] = RT(v).Filter_Altimiter(in);
-%                     alt = -alt;
-                    
                     alt     = -RT(v).filteredData.altitude(in);             % Use Filtered Data
+                    offset  =  RT(v).filteredData.alt_offset(in,:);
+                    
 %                     alt     = -RT(v).orical.alt(in);                        % Feed in perfect Altimiter readings
                      
                     if alt == 0 || isnan(alt)                               % Check for valid altimiter readings
                         RT(v).tbn = RT(v).tbn.Update(speed, dt, heading);
                     else
-                        RT(v).tbn = RT(v).tbn.Update(speed, dt, heading, alt);
+                        RT(v).tbn = RT(v).tbn.Update(speed, dt, heading, alt, offset);
                     end
-                    
+                   
                     count(v) = count(v) + 1;
                     
                     sim_times( count(v), v ) = time;
@@ -67,7 +68,7 @@ for time = timeLine'                                                        % Ru
                 
                 
                 % ---- Process Recived Acomms messages ----
-                if strcmp(mem{1},'acomms') && ~isnat(RT(v).acomms.recived_msg(in))
+                if strcmp(mem{1},'acomms') && ~isnat(RT(v).acomms.recived_msg(in)) && RT(v).acomms.policy(in)
                     
                     if v == 1, s=2;                                         % Get index of the vehicle that sent the message
                     else, s = 1;
@@ -82,6 +83,8 @@ for time = timeLine'                                                        % Ru
                     
                     RT(v).tbn = RT(v).tbn.Acoms(dist, x, sig);
                     
+                    comms_count(v) = comms_count(v) + 1;
+                    
                     
                 end
                 
@@ -91,6 +94,9 @@ for time = timeLine'                                                        % Ru
     end
 end
 
+
+fprintf('\nNumber of Communications Recived By\n')
+fprintf('%s, %d\n%s, %d\n\n', RT(1).name, comms_count(1), RT(2).name, comms_count(2) )
 
 % --- Copy over TBN path to RT and conver to lat_lon ---
     

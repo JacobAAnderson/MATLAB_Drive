@@ -546,9 +546,9 @@ classdef CommunicationPlanning
                 
                 leafs.growth(t) = leafs(1).count;                           % Keep track of howmany simulations are present
                 
-                Write2File(sprintf('%s_PlanningAlg_stats.txt', obj.name), '%d, %d, %f\n', [t, leafs(1).count, toc] )
+%                 Write2File(sprintf('%s_PlanningAlg_stats.txt', obj.name), '%d, %d, %f\n', [t, leafs(1).count, toc] )
                 
-                fprintf('%s, T: %d, N: %d, Loop Time: %f\n',obj.name, t, leafs(1).count, toc)
+%                 fprintf('%s, T: %d, N: %d, Loop Time: %f\n',obj.name, t, leafs(1).count, toc)
                 
                 
                 % --- Check For Goal ---

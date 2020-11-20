@@ -55,10 +55,12 @@ data = [data(:,3), data(:,2), data(:,4)];
 data = [data; rt_bathy];                                                    % Combine riptide and Lutra data
 
 
+data(:,3) = LowpassFilter(data(:,3), 16);
+
 % --- clean Up the data ----
 out = any(isnan(data),2) | ...
       any(isinf(data),2) | ...
-      data(:,3) == 0     | ...
+      data(:,3) < 0.25   | ...
       data(:,3) > 16;
       
 
@@ -124,7 +126,7 @@ if nargin == 2
     idx(alt > threshold) = true;
 end
 
-idx(alt >= 0)   = true;
+idx(alt >= 0.25)   = true;
 idx(isnan(alt)) = true;
 idx(isinf(alt)) = true;
 
@@ -164,6 +166,35 @@ end
 
 
 
+function alt = LowpassFilter(alt, threshold)
 
+
+sw = SlidingWindow(10, numel(alt));
+
+alt( abs(alt) < 0.25)      = NaN;
+alt( abs(alt) > threshold) = NaN;
+
+if nanmean(alt) > 0
+    alt(alt < 0) = NaN;
+else
+    alt(alt > 0) = NaN;
+end
+
+
+for ii = 1:numel(alt)
+
+    rows = sw.D1(ii);
+    
+    mu = nanmean(alt(rows));
+    sig = nanstd(alt(rows));
+    
+    if  abs( alt(ii) -mu ) > 2*sig
+        alt(ii) = mu;
+        
+    end
+
+end
+
+end
 
 

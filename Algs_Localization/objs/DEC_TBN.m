@@ -75,7 +75,7 @@ classdef DEC_TBN
         
         
         % Update Partilce Filter Locations and Weigths from Dead Reckoning
-        function obj = Update(obj, speed, dt, heading, measurment)
+        function obj = Update(obj, speed, dt, heading, measurment, offset)
             
             % --- Move the particles ---
             heading = heading + random(obj.noise.compass, obj.num_Particles, 1); % Add noise to the heading
@@ -94,9 +94,13 @@ classdef DEC_TBN
             newParticles(newParticles(:,2) < obj.Map.origin(2), 2) = obj.Map.origin(2);
             
             % --- Update weights based on altimeter reading if provided ---
-            if nargin == 5
+            if nargin >= 5
                 
-                depths  = obj.Map.Depth(newParticles);                      % Sample the map
+                if nargin == 6
+                    depths  = obj.Map.Depth(newParticles + offset);         % Sample the map, apply attitude offset
+                else
+                    depths  = obj.Map.Depth(newParticles);                  % Sample the map
+                end
                 
                 diffs = depths + measurment;                                % Update the weights
                 
