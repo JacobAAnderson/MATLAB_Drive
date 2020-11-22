@@ -252,8 +252,7 @@ classdef Riptide_Data
             obj.tbn = obj.tbn.Add_Map(map);                                   % Provide Bathymetry map
             obj.tbn = obj.tbn.SetLocation(obj.path.GT.utm(1,:), [3,0;0,3]);   % Tell it where the vehicle is starting from
             
-            disp(obj.name)
-            
+
             % --- Set vehicle transiton model as a probability distribuition ( "type of distribuition' , mu, sigma ) ---
             for prop = {'acoms',  'altimeter', 'compass' 'speed';           % --> Type of noise
                         'Normal', 'Normal',    'Normal', 'Normal';          % --> Default distribion type
@@ -280,11 +279,59 @@ classdef Riptide_Data
             % Create perfect altimiter profile for testing
             
             gt = obj.path.GT.utm;
-            dr = obj.path.DR_corrected.utm;
+            dr = obj.path.DR_Corrected.utm;
             
             obj.orical.gtAlt = map.Depth(gt);
             obj.orical.drAlt = map.Depth(dr);
             
+            
+            
+        end
+        
+        
+        function obj = CorrectCourse(obj, geotiff)
+            
+            if ~isfield(obj.vehicleModel, 'compassFit_inv') || ~isfield(obj.vehicleModel, 'speedFit')
+                warning("Compass model and/or speed are not avalalbe")
+                return
+            end
+            
+            path_  = obj.course.waypoints;                                  % Path needs to be lon-lat
+            speed = obj.vehicleModel.speedFit;
+            
+            [xx, yy, zone] = deg2utm(path_(1,2), path_(1,1));               % Get Starting location in utms
+            
+            [distance, heading, ~] = WayPoint2DeadReckoning(path_, speed, 'm/s');
+            
+            f = obj.vehicleModel.compassFit_inv;
+            
+            heading = feval(f,heading);
+            
+            x = distance' .* [sind(heading), cosd(heading)];
+            
+            x = cumsum([xx,yy; x]);
+            
+            [lat, lon] = utm2deg( x(:,1), x(:,2), repmat(zone, size(x,1), 1) );
+            
+            obj.course.waypoints = [lon, lat];
+            
+            
+            % Show transform
+            if nargin == 2
+                
+                gt = obj.path.GT.lat_lon;
+                
+                figure('name', sprintf('%s Course Correction', obj.name) )
+                geotiff.Show;
+                hold on
+                p1 = plot(gt(:,2), gt(:,1));
+                p2 = plot(path_(:,1), path_(:,2));
+                p3 = plot(lon, lat);
+                hold off
+                legend([p1,p2,p3], ["GT", "Origonal Course", "Corrected Course"])
+                drawnow
+                
+            end
             
             
         end
@@ -448,9 +495,9 @@ classdef Riptide_Data
             
             [dr_lat, dr_lon] = utm2deg(x + xx(1), y+yy(1), utmzone);
             
-            obj.path.DR_corrected.utm(:,1) = x + xx(1);
-            obj.path.DR_corrected.utm(:,2) = y + yy(1);
-            obj.path.DR_corrected.lat_lon  = [dr_lat, dr_lon];
+            obj.path.DR_Corrected.utm(:,1) = x + xx(1);
+            obj.path.DR_Corrected.utm(:,2) = y + yy(1);
+            obj.path.DR_Corrected.lat_lon  = [dr_lat, dr_lon];
             
             
             
@@ -878,11 +925,8 @@ classdef Riptide_Data
                             obj.(type{2})(bb).(mems{1}) = obj.(type{1})(bb).(mems{1});
                         else                                                                            % Choose individual data that are associated witht he mission
                             data_ = obj.(type{1})(bb).(mems{1});
-                            try
                             obj.(type{2})(bb).(mems{1}) = data_(in,:);
-                            catch E
-                                disp(E)
-                            end
+                            
                         end
                         
                     end
@@ -918,8 +962,11 @@ classdef Riptide_Data
             
             path = path - dxdy;
             
-            
+            try
             [xx, yy] = deg2utm( path(:,1), path(:,2) );
+            catch E
+                disp(E)
+            end
             
             path = [xx,yy];
             
@@ -935,7 +982,7 @@ classdef Riptide_Data
         end
         
         
-        function obj = VehicleModeling(obj, modelType, bathy, skip)
+        function obj = VehicleModeling(obj, modelType, bathy, skip, dispIO)
             
             a_     = zeros(10000,1);
             c_     = zeros(10000,1);
@@ -946,7 +993,7 @@ classdef Riptide_Data
             a = 1;
             for ii = 1:size(obj.manifest,1)
    
-                if nargin == 4 && ii == skip, continue, end
+                if nargin >= 4 && any(ii == skip), continue, end
                 
                 
                 obj = obj.Select_Mission(ii);                               % Get Mission
@@ -1043,15 +1090,22 @@ classdef Riptide_Data
             mu  = mean(speed_);
             sig = std(speed_);
            
+            stat.speed.mu = mu;
+            stat.speed.sig = sig;
+            
             obj.vehicleModel.speed       = makedist('Normal', 'mu', 0, 'sigma', sig);
             obj.vehicleModel.units.speed = "m/s";
             
             obj.vehicleModel.speedFit = mu;
             
             
+            
             % Compass model
-%             mu = nanmean(err);
+            mu = nanmean(err);
             sig = nanstd(err_);
+            
+            stat.compass.mu = mu;
+            stat.compass.sig = sig;
             
             obj.vehicleModel.compass = makedist('Normal','mu', 0,'sigma',sig);
             obj.vehicleModel.units.compass = 'deg';
@@ -1064,10 +1118,30 @@ classdef Riptide_Data
             mu  = nanmean( altEr_ );
             sig = nanstd( altEr_ );
             
+            stat.altimeter.mu = mu;
+            stat.altimeter.sig = sig;
+            
             obj.vehicleModel.altimeter = makedist('Normal','mu', 0,'sigma',sig);
             obj.vehicleModel.units.altimeter = "m";
             
             obj.vehicleModel.altFit = mu;
+            
+            
+            if nargin == 5 && dispIO
+                
+                fprintf('\n%s Vehicle Stats:\n', obj.name)
+                
+                for ii = {'Altimeter', 'Compass', 'Speed';
+                          'altimeter', 'compass', 'speed';
+                          '[m]',       '[deg]',   '[m/s]'}
+                    
+                    mu  = stat.(ii{2}).mu;
+                    sig = stat.(ii{2}).sig;
+                    
+                    fprintf("%s: %.3f %s %.3f  %s\n",ii{1}, mu, char(177), sig, ii{3})
+                    
+                end
+            end
             
         end
          
@@ -1121,10 +1195,13 @@ classdef Riptide_Data
             
             hold off
             
-            title(sprintf("Riptide %s's Paths", obj.name), 'FontSize', 14)
-            xlabel('Easitng', 'FontSize', 14)
-            ylabel('Northing', 'FontSize', 14)
-            legend([p, p1, p2] ,[mem; {'Start'; 'End'}], 'Interpreter', 'non', 'FontSize', 12)
+            ax = gca;
+            ax.FontSize = 12;       % Set font size first or else you will loose the rest of the formatting
+            
+            title(sprintf("Zig Zag Mission 2: Riptide %s's Paths", obj.name), 'FontSize', 20)
+            xlabel('Longitude', 'FontSize', 16)
+            ylabel('Latitude',  'FontSize', 16)
+            legend([p, p1, p2] ,[mem; {'Start'; 'End'}], 'Interpreter', 'non', 'FontSize', 14)
             
             drawnow
             
@@ -1133,44 +1210,7 @@ classdef Riptide_Data
             end
             
         end
-        
-        
-        function figOut = Plot_Path(obj, fig_, path, c)
-            
-            if nargin > 1 && isa(fig_, 'Geotiff')
-                fig = figure('name', sprintf('Riptide %s Paths', obj.name), 'numbertitle', 'off');
-                fig_.Show
-                
-            elseif nargin > 1 && isgraphics(fig_, 'figure')
-                fig = figure(fig_);
-            else
-                fig = figure('name', sprintf('Riptide %s Paths', obj.name), 'numbertitle', 'off');
-            end
-            
-            if nargin < 4, c = 'g'; end
-            
-            ii = 1;
-            
-            figure(fig);
-            hold on
-            
-            plot(obj.path(ii).(path).lat_lon(:,2),   obj.path(ii).(path).lat_lon(:,1),   c);     % Plot Pathe
-            plot(obj.path(ii).(path).lat_lon(end,2), obj.path(ii).(path).lat_lon(end,1), ['*',c]);
-            plot(obj.path(ii).(path).lat_lon(end,2), obj.path(ii).(path).lat_lon(end,1), ['o',c]);
-            
-            title(sprintf("Riptide %s's Paths", obj.name), 'FontSize', 14)
-            xlabel('Easitng', 'FontSize', 14)
-            ylabel('Northing', 'FontSize', 14)
-            
-            hold off
-            drawnow
-            
-            if nargout == 1
-                figOut = fig;
-            end
-            
-        end
-        
+          
         
         function figOut = Plot_Course(obj, fig_)
             
@@ -1185,20 +1225,22 @@ classdef Riptide_Data
             end
             
             waypoints = obj.course.waypoints;
-            
-            str = fig.CurrentAxes.Legend.String;
+           
             hold on
             
             plot(waypoints(:,1), waypoints(:,2), '*-c')
             plot(waypoints(1,1), waypoints(1,2), 'dc')
             
-            fig.CurrentAxes.Legend.String = str;
             
             hold off
             
-            title(sprintf("Riptide %s's Paths", obj.name), 'FontSize', 14)
-            xlabel('Easitng', 'FontSize', 14)
-            ylabel('Northing', 'FontSize', 14)
+            ax = gca;
+            ax.FontSize = 12;       % Set font size first or else you will loose the rest of the formatting
+
+            title(sprintf("Riptide %s's Course", obj.name), 'FontSize', 20)
+            xlabel('Longitude', 'FontSize', 16)
+            ylabel('Latitude',  'FontSize', 16)
+            
             drawnow
             
             if nargout == 1
@@ -1224,9 +1266,14 @@ classdef Riptide_Data
             hold on
             plot(obj.acomms.vehicle(:,2), obj.acomms.vehicle(:,1), '*')
             hold off
-            title(sprintf("Riptide %s's Acoustric Communications", obj.name), 'FontSize', 14)
-            xlabel('Easitng', 'FontSize', 14)
-            ylabel('Northing', 'FontSize', 14)
+            
+            ax = gca;
+            ax.FontSize = 12;       % Set font size first or else you will loose the rest of the formatting
+
+            title(sprintf("Riptide %s's Acoustric Communications", obj.name), 'FontSize', 20)
+            xlabel('Longitude', 'FontSize', 16)
+            ylabel('Latitude',  'FontSize', 16)
+ 
             
             drawnow
             
@@ -1276,6 +1323,9 @@ classdef Riptide_Data
                 p2 = plot(obj.orical.gtAlt);
                 p3 = plot(obj.orical.drAlt);
                 hold off
+
+                ax = gca;
+                ax.FontSize = 12;       % Set font size first or else you will loose the rest of the formatting
                 
                 xlabel('Time Step')
                 ylabel('Altitude [m]')
@@ -1321,6 +1371,9 @@ classdef Riptide_Data
             p2 = plot(lat_lon(~oo,2), lat_lon(~oo,1), 'g.');      % Plot ~0s
             
             hold off
+
+            ax = gca;
+            ax.FontSize = 12;       % Set font size first or else you will loose the rest of the formatting
             
             title(sprintf("Riptide %s's Altimiter Data", obj.name), 'FontSize', 14)
             xlabel('Easitng', 'FontSize', 14)

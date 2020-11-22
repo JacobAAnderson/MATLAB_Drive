@@ -17,26 +17,15 @@ comms_count = [0,0];
 sim_times = NaT( size(timeLine,1), 2);
 
 
-if dec_tbn                                                                  % Choose weaterh or not to include acoms for dec-tbn
-    members = {'data', 'acomms'};
-else
-    members = {'data'};
-end
-
-
 % ---- Run through data logs doing TBN -----
 
-if dec_tbn
-    disp('==== Performing DEC-TBN =========================')
-else
-    disp('==== Performing TBN =============================')
-end
+fprintf('\n==== Performing %s =========================\n', dec_tbn)
     
 for time = timeLine'                                                        % Run the timeline
    
     for v = [1:numel(RT); numel(RT):1]                                      % Switch between vehicles
              
-        for mem = members                                                   % Switch between data sources
+        for mem = {'data', 'acomms'}                                                  % Switch between data sources
     
             for in = find( dtfs.Ismember( RT(v).(mem{1}).gpsDate, time) )'  % Find which data it is time for
                 
@@ -68,7 +57,7 @@ for time = timeLine'                                                        % Ru
                 
                 
                 % ---- Process Recived Acomms messages ----
-                if strcmp(mem{1},'acomms') && ~isnat(RT(v).acomms.recived_msg(in)) && RT(v).acomms.policy(in)
+                if strcmp(mem{1},'acomms') && ~isnat(RT(v).acomms.recived_msg(in)) && RT(v).acomms.policy.(dec_tbn)(in)
                     
                     if v == 1, s=2;                                         % Get index of the vehicle that sent the message
                     else, s = 1;

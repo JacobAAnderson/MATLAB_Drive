@@ -48,40 +48,22 @@ clear owtof filters
 close all
 clc
 
-load('/Users/jake/_OutPuts/RT_FostersLake.mat')
+load('/Users/jake/_OutPuts/RT_FostersLake.mat')                             % Start with a clean copy of the data
 
-% ------ 2020-09-21 ----------------
-% missions = [ 1, 1];         % Fosters Lake Mission Set: CurcumNav1, CircumNav2
-% missions = [ 2, 2];         % Fosters Lake Mission Set: CurcumNav1, CircumNav2        --> Good Acoms
-% missions = [ 3, 3];         % Fosters Lake Mission Set: Dimond1_A, Dimond1_B          --> Decent Acomms
-
-% ------ 2020-10-09 ----------------
-% missions = [ 5, 7];         % Fosters Lake Mission Set: test1, test2
-% missions = [ 7, 8];         % Fosters Lake Mission Set: ZZ1, ZZ2
-% missions = [ 8, 9];         % Fosters Lake Mission Set: ZZ1, ZZ2
-% missions = [ 9,10];         % Fosters Lake Mission Set: ZZ3_A, ZZ3_B                  --> Decent Acoms
-% missions = [10,11];         % Fosters Lake Mission Set: ZZ3_A, ZZ3_B                  --> Decent Acomms
-
-% ------ 2020-10-27 ----------------
-% missions = [11,12];         % Fosters Lake Mission Set:CircumNav2_B, CircumNave2_A    --> Decent Acomms
-% missions = [14,15];         % * Fosters Lake Mission Set:ZZ1, ZZ2                       --> Decent Acomms
-% missions = [15,16];         % Fosters Lake Mission Set:Dimond1_A, Dimond1_B  (DEC-TBN Does better)
-% missions = [16,17];         % * Fosters Lake Mission Set:ZZ4_B, ZZ4_A  
-
- 
- % ------ 2020-10-27 ----------------
-% missions = [1,1];         % Fosters Lake Mission Set:CircumNav2_B, CircumNave2_A    --> Decent Acomms
+% ------ Missions   2020-10-27   ------------------------------------------
+% missions = [1,1];         %    Fosters Lake Mission Set:CircumNav2_B, CircumNave2_A   --> Decent Acomms
  missions = [3,3];         % *! Fosters Lake Mission Set:Dimond1_A, Dimond1_B          --> Good TBN
-% missions = [4,4];         % Fosters Lake Mission Set:ZZ1, ZZ2                       --> Decent Acomms
-% missions = [5,5];         % *! Fosters Lake Mission Set:Dimond1_A, Dimond1_B  (DEC-TBN Does better)
-% missions = [6,6];         % *! Fosters Lake Mission Set:ZZ4_B, ZZ4_A  
+% missions = [4,4];         %    Fosters Lake Mission Set:ZZ1, ZZ2                      --> Decent Acomms
+% missions = [5,5];         % *! Fosters Lake Mission Set:Dimond1_A, Dimond1_B          --> (DEC-TBN Does better)
+% missions = [6,6];         % *!! Fosters Lake Mission Set:ZZ4_B, ZZ4_A  
  
 
+% ----- Setup -------------------------------------------------------------
 % fig1 = geotiff.Show;                                                      % Show geotiff for plotting paths
 
 for v = 1: numel(RT)
     
-    RT(v) = RT(v).VehicleModeling('poly2', bathy, missions(v));             % Do vehicle modeling that excludes data from the selected mission
+    RT(v) = RT(v).VehicleModeling('poly2', bathy, [1,missions(v)], true);   % Do vehicle modeling that excludes data from the selected mission
     
     % -- Select mission --
     RT(v) = RT(v).Select_Mission( missions(v) );                            % Choose Mission
@@ -93,15 +75,16 @@ for v = 1: numel(RT)
     RT(v) = RT(v).Get_VehiclePaths;                                         % Evaluate GT and Corrected DR paths from the speed and compass models
     
     % -- Terrain Based Navigation stuff --
-    RT(v) = RT(v).Add_TBN(bathy, 1);                                        % Prep Particle filters
-    RT(v) = RT(v).Model_Altimiter(false);                                    % Filter Altimiter data and build normal distribution
+    RT(v) = RT(v).Add_TBN(bathy, 1);                                        % Prep Particle filters with std inflation ratio
+    RT(v) = RT(v).Model_Altimiter(false);                                   % Filter Altimiter data and build normal distribution
    
     % -- Generic DEC-TBN Policies ---
-    RT(v) = RT(v).Add_CommsPloicy( 'tbn', false);
-    RT(v) = RT(v).Add_CommsPloicy( 'full', true);
+    RT(v) = RT(v).Add_CommsPloicy( 'TBN', false);                           % Add TBN policy with all false
+    RT(v) = RT(v).Add_CommsPloicy( 'Full', true);                           % Add Full DEC-TBP policy with all true
     
     % -- Plot/display Stuff --
     RT(v).Disp_Manifest;                                                    % Display Vehicle Manifest
+%    RT(v).Plot_Course(geotiff);
 %     fig1 = RT(v).Plot_Paths(fig1);                                        % Show paths on a geotiff
 %     RT(v).Plot_AltimeterProfile;                                          % Show Altimeter profile
 %     RT(v).Plot_Altimeter(geotiff);                                        % Show Altimeter location on map
@@ -109,8 +92,11 @@ for v = 1: numel(RT)
 end
 
 
+RT(v) = RT(v).CorrectCourse(geotiff);                                       % Correct Nemo's course for the comms planning
+
+
 [mu, sig] = rtAcms.Mission_Latency(RT);                                     % Get Acoustic modem model for the selected mission
-                                   
+
 
 for v = 1:numel(RT)                                                         % Set Acomms Noise Distributions 
     m = seconds(mu(v));
@@ -120,12 +106,12 @@ end
 
 % rtAcms.Plot_AcousticCommunications(RT, geotiff);                          % Plot Acoustic Communications
 
-clear v m s
-
-RT_ = RT;                                                                   % Keep a clean copy of RT
+clear v m s sig
 
 
-% ---- Get Timeline -----
+
+
+% ----- Get Timeline ------------------------------------------------------
 if ~isequal( timeLine_mission, missions)
     disp("--- Getting Time Line ---")
     tic
@@ -142,10 +128,27 @@ end
 
 
 
-% -- Communication planning --
+
+% _____ Communication planning ____________________________________________
 % clc
 % close all
-% 
+
+
+% ----- Tune Particle Filter for planning ---------------------------------
+for prop = { 'altimeter', 'compass' 'speed';           % --> Type of noise
+             'Normal',    'Normal', 'Normal';          % --> Default distribion type
+              0,           0,        0;                % --> Default mu
+              2.0,         25,       1.5;              % --> Sigma for Dory
+              2.0,         25,       1.5}              % --> Sigma for Nemo
+    
+
+        RT(1).tbn = RT(1).tbn.SetNoise(prop{1}, prop{2}, prop{3}, prop{4});
+        RT(2).tbn = RT(2).tbn.SetNoise(prop{1}, prop{2}, prop{3}, prop{5});
+
+end
+
+
+
 for ii = [1: numel(RT); numel(RT):-1:1], v = ii(1); s = ii(2);
 
     RT(v) = RT(v).Add_CommsPlanner;                                                     % Instanciate communications planner
@@ -155,6 +158,9 @@ for ii = [1: numel(RT); numel(RT):-1:1], v = ii(1); s = ii(2);
    
 end
 
+
+cov_max = 1.25; 
+threshold = 25;
 
 
 dt = 30;                % Time step in seconds
@@ -169,33 +175,33 @@ for ii = [1: numel(RT); numel(RT): -1: 1], v = ii(1); s = ii(2);
     
     sz = floor( (stop - start)/ dt_ );
     
-    policy = [false; RT(v).commsPlanner.Plan2(sz, dt, 1.25, false)];        % Generate the policy and append a false to the front since it the planing starts at t = 2
+    policy = [false; RT(v).commsPlanner.Plan2(sz, dt, cov_max, threshold, false)];        % Generate the policy and append a false to the front since it the planing starts at t = 2
     
     policyTimes = start: dt_: stop;
     
-    RT(s) = RT(s).Add_CommsPloicy('plan', policyTimes(policy), dt);        % Tell the other vehicle which communications it can use
+    RT(s) = RT(s).Add_CommsPloicy('Plan', policyTimes(policy), dt);         % Tell the other vehicle which communications it can use
     
 end
 
 
-clear ii v s
+clear ii v s dt dt_ policy policyTimes sz stop start
 
 
-% _____ Do TBN _____________________
+% _____ Do TBN ____________________________________________________________
 %clc
 %close all
  
 num_trials = 1;
 
 % --- Instanciate rAd to track data ---
-paths = {'DR_Correctd', 'DEC_TBN', 'TBN'};                                  % Set up rAd with DR corrected data
+paths = {'DR_Corrected', 'TBN', 'Full', 'Plan'};                             % Set up rAd with DR corrected data
 types = {'Dory_Error', 'Nemo_Error', 'Joint_Error', 'Time'};
 
 [rAd, gtPaths] = GetRAD(RT, paths, types, num_trials, timeLine);            % Create rAd with DR Correctd data entered
 
-% RT = RT_;
 
 
+% ----- Tune Particle Filter for Localizing -------------------------------
 for prop = { 'altimeter', 'compass' 'speed';           % --> Type of noise
              'Normal',    'Normal', 'Normal';          % --> Default distribion type
               0,           0,        0;                % --> Default mu
@@ -208,42 +214,45 @@ for prop = { 'altimeter', 'compass' 'speed';           % --> Type of noise
 
 end
 
+clear prop
 
 
 % --- TBN Simulation ---
-for dec_tbn = {'tbn', 'full', 'plan'}                                       % Switch between TBN and DEC-TBN
+for dec_tbn = {'TBN', 'Full', 'Plan'}                                       % Switch between TBN and DEC-TBN
+    
     for iter = 1: num_trials
         
         [tbnPaths, sim_times, ~] = Riptide_TBN_Sim(RT, timeLine, sos, mu, dec_tbn{1});    % Do TBN / DEC-TBN simulation
         
         rAd = TallyPathData(rAd, iter, dec_tbn{1}, gtPaths, tbnPaths, sim_times, timeLine);     % Calculate path errors and add to rAd
-        
-        
-        if iter == num_trials
-            
-            for v = 1: numel(RT)
-                
-                RT(v) = RT(v).Add_Path(tbnPaths(:,:,v), dec_tbn{1}, 'utm');
-                
-            end
-        end
           
     end
+    
+    
+    for v = 1: numel(RT)
+        
+        RT(v) = RT(v).Add_Path(tbnPaths(:,:,v), dec_tbn{1}, 'utm');
+        
+    end
+    
+    
 end
 
+clear dec_tbn iter tbnPaths sim_times
 
 
 rAd = rAd.Eval_Stats('Time');                                               % Determine average error and total error
 
+
+% ____ Display Graphs _____________________________________________________
+
 DisplyRAD(rAd, types, paths)                                                % Display Result Stats
 
+fprintf("Duration %.2f [sec]", seconds(timeLine(end) - timeLine(1)))
 
-% ____ Display Specific Graphs ___________________________________________
 for v = 1:numel(RT)
     
-%    RT(v).Plot_Paths(geotiff, {'EKF'});
-    
-     RT(v).Plot_Paths(geotiff, {'GT', 'DR_corrected', 'TBN', 'DEC_TBN'});                                             % Plot lat-lon path on geotiff
+     RT(v).Plot_Paths(geotiff, [{'GT'}, paths]);                            % Plot lat-lon path on geotiff
    
 end
 
@@ -251,7 +260,7 @@ end
 
 
 
-%% ========= Functions ==============
+%% ========= Functions ====================================================
 
 
 %% Create rAd and out put GT paths for later err calculations
@@ -276,14 +285,14 @@ drTimes = NaT(num, numel(RT));
 for v = 1: numel(RT)
     
     sz = size( RT(v).path.GT.utm, 1);
-    drPaths(1:sz,:,v) = RT(v).path.DR_corrected.utm;
+    drPaths(1:sz,:,v) = RT(v).path.DR_Corrected.utm;
     
     drTimes(1:sz,v) = RT(v).data.gpsDate;
     
     
 end
 
-rAd = TallyPathData(rAd, 1, paths(1), gtPaths, drPaths, drTimes, timeLine, true);
+rAd = TallyPathData(rAd, 1, paths{1}, gtPaths, drPaths, drTimes, timeLine);
 
 
 end
@@ -292,11 +301,8 @@ end
 
 
 %% Add Path data to rAd 
-function rAd = TallyPathData(rAd, iter, paths, gtPaths, tbnPaths, times, t, dec_tbn)
+function rAd = TallyPathData(rAd, iter, path, gtPaths, tbnPaths, times, t)
 
-if dec_tbn, path = paths(1);
-else,       path = paths(2);
-end
 
 s = size(gtPaths,3);
 
@@ -336,7 +342,7 @@ end
 err(:,end) = nansum(err, 2);
 
 for ii = 1:size(err,1)
-    rAd = rAd.Add_Result(iter, path{1}, err(ii,1), err(ii,2), err(ii,3), t(ii) ); % Add data to the respective set
+    rAd = rAd.Add_Result(iter, path, err(ii,1), err(ii,2), err(ii,3), t(ii) ); % Add data to the respective set
 end
 
 
@@ -353,11 +359,14 @@ function DisplyRAD(rAd, types, paths)
 %for t = types(1:3), rAd.PlotData( paths, t{1}, 'Time'), end
 for t = types(1:3), rAd.PlotStat( paths, 'Ave', t{1}, 'Time'), end
 
-
 fprintf('\n\n\n')
-fprintf("Total Joint Error for DR Cor.:  %.2f [m s]\n", rAd.Stats.DR_Correctd.Joint_Error.Area_Ave)
-fprintf("Total Joint Error for DEC-TBN:  %.2f [m s]\n", rAd.Stats.DEC_TBN.Joint_Error.Area_Ave)
-fprintf("Total Joint Error for TBN:      %.2f [m s]\n", rAd.Stats.TBN.Joint_Error.Area_Ave)
+
+for p = paths
+
+    fprintf("Total Joint Error for %s:  %.2f [m s]\n", p{1}, rAd.Stats.(p{1}).Joint_Error.Area_Ave )
+
+end
+
 fprintf('\n\n\n')
 
 end
