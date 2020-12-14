@@ -357,7 +357,7 @@ classdef Bathymetry_Map
             
             hold off
             
-            if narout == 1
+            if nargout == 1
                 figOut = fig;
             end
             

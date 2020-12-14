@@ -271,7 +271,7 @@ classdef CommunicationPlanning
         
         
         % Plan Communications - distribuition clustering
-        function policy = Plan2(obj, T, dt, cov_max, threshold, plotIO)
+        function policy = Plan2(obj, T, dt, cov_max, threshold, clustering, plotIO)
             
             n    = 1;               % Current node index
             k    = 10;              % Number of Clusters
@@ -281,7 +281,13 @@ classdef CommunicationPlanning
             err = 100;              % Base Node Error
             action = false;         % Current communications acction
             
-            if nargin < 6, plotIO = false; end
+            if nargin < 6
+                clustering = false; 
+                plotIO = false; 
+            elseif nargin < 7  
+                plotIO = false; 
+            end
+            
             
             leafs = Queue(2*T, {'index','parent','sim','cov','dist'});     % Simulation Queue
             leafs = leafs.Add_Node(1, 0, obj.vehicles, 6, []);              % Add the first node
@@ -300,8 +306,6 @@ classdef CommunicationPlanning
             
             
             for t = 2:T
-                
-                tic
                 
                 time = t;
                 
@@ -358,7 +362,7 @@ classdef CommunicationPlanning
                 
 
                 % --- Merge Dublicate States ------------------------------
-                if leafs.count >= k_
+                if clustering && leafs.count >= k_
                     
                     % 1) Cluster nodes by particle filter distribuition
                     idx = [0; leafs.Cluster_Nodes(k, true)];                % Perform Node clustering and add the base node to the clusters
@@ -412,10 +416,6 @@ classdef CommunicationPlanning
                 
                 leafs.growth(t) = leafs(1).count;                           % Keep track of howmany simulations are present
                 
-%                 Write2File(sprintf('%s_PlanningAlg_stats.txt', obj.name), '%d, %d, %f\n', [t, leafs(1).count, toc] )
-                
-%                 fprintf('%s, T: %d, N: %d, Loop Time: %f\n',obj.name, t, leafs(1).count, toc)
-                
                 
                 % --- Check For Goal ---
                 if done, break, end                                         % End Simulation if the vehicle has acchived its goal
@@ -425,12 +425,8 @@ classdef CommunicationPlanning
             
             % --- Find Communications Policy ------------------------------
             for ii = leafs(1).count: -1: 1
-                try
-                    [P(ii,:), d(ii)] = shortestpath(G,1,leafs.Value(ii, 'index') );    % Get path from optimal leafnode
-                catch E
-                    warning(E.message)
-                    pause
-                end
+                
+                [P(ii,:), d(ii)] = shortestpath(G,1,leafs.Value(ii, 'index') );    % Get path from optimal leafnode
             end
             
             covs = G.Nodes.cov(leafs.List('index'));
@@ -445,17 +441,32 @@ classdef CommunicationPlanning
             
             policy = G.Nodes.action(P(1,:));                                     % Get Communications Policy
             
-            figure('name',obj.name)
-            subplot(3,1,1)
-            plot(G.Nodes.time(P(1,:)))
-            title("time Steps")
-            subplot(3,1,2)
+%             figure('name',obj.name)
+%             subplot(3,1,1)
+%             plot(G.Nodes.time(P(1,:)))
+%             title("time Steps")
+%             subplot(3,1,2)
+%             plot(policy)
+%             title("Communication Ploicy")
+%             subplot(3,1,3)
+%             error.Plot;
+%             drawnow
+           
+
+            figure('name',sprintf("%s Communication Policy", obj.name))
             plot(policy)
-            title("Communication Ploicy")
-            subplot(3,1,3)
-            error.Plot;
-            drawnow
             
+            ax = gca;
+            ax.FontSize = 12;       % Set font size first or else you will loose the rest of the formatting
+            
+            title(sprintf("%s Communication Policy", obj.name), 'FontSize', 20)
+            xlabel("Time Step", 'FontSize', 16)
+            ylabel("Communicate", 'FontSize', 16)
+            drawnow
+
+
+
+
             fprintf('\nCommunications Planning Finnished for %s\n', obj.name) %Time: %f [min]\n',toc/60)
             fprintf('Number of Communications: %d\n', sum(policy))
 %             fprintf('Expected Error: %f\n\n', covs(in))
@@ -496,18 +507,20 @@ for ii = [1:c; 1:2:c*2]
     if ii(1) == 1
         [vehicles(1), done(1)] = Simulate(vehicles(1), dt);
         X   = vehicles(1).PF.X;
-        Cov = vehicles(1).PF.cov;
-%         err = trace(vehicles(ii).PF.cov);
+        Cov = vehicles(1).PF.cov;                                           % TBN
+%        Cov = vehicles(1).PF.Cov;                                           % ParticleFilter
+        
     else
         [vehicles( ii(1) ), done( ii(1) )] = Simulate(vehicles( ii(1) ), dt, X, Cov);
-%         if trace(err) < trace(vehicles(ii).PF.cov), err = vehicles(ii).PF.cov; end
     end
     
     set = ii(2): ii(2)+1;
     dist.mu(set)      = vehicles( ii(1) ).PF.X(1:2);
-    dist.cov(set,set) = vehicles( ii(1) ).PF.cov(1:2,1:2);
+    dist.cov(set,set) = vehicles( ii(1) ).PF.cov(1:2,1:2);                  % TBN
+%    dist.cov(set,set) = vehicles( ii(1) ).PF.Cov(1:2,1:2);                  % ParticleFilter
     
-    err = err + trace(vehicles( ii(1) ).PF.cov);
+    err = err + trace(vehicles( ii(1) ).PF.cov);                            % TBN
+%    err = err + trace(vehicles( ii(1) ).PF.Cov);                            % ParticleFilter
 end
 
 % err  = trace(err);
@@ -532,18 +545,13 @@ for ii = [1:c; 1:2:c*2]
     
     set = ii(2): ii(2)+1;
     dist.mu(set)      = vehicles( ii(1) ).PF.X(1:2);
-    dist.cov(set,set) = vehicles( ii(1) ).PF.cov(1:2,1:2);
+    dist.cov(set,set) = vehicles( ii(1) ).PF.cov(1:2,1:2);                  % TBN
+%    dist.cov(set,set) = vehicles( ii(1) ).PF.Cov(1:2,1:2);                  % ParticleFilter
     
     
-    err = err + trace(vehicles( ii(1) ).PF.cov);
+    err = err + trace(vehicles( ii(1) ).PF.cov);                           % TBN
+%    err = err + trace(vehicles( ii(1) ).PF.Cov);                            % ParticleFilter
 
-%     err_ = trace(vehicles(ii).PF.cov);
-% 
-%     if err_ > err, err = err_; end
-    
-%      if ~strcmp(vehicles(ii).name, 'self') && trace(err) < trace(vehicles(ii).PF.cov)
-%         err = vehicles(ii).PF.cov;
-%     end
 end
 end
 
@@ -568,71 +576,17 @@ if nargin < 3
 else
     dist = vecnorm( pf.X(1:2) - X(1:2)) + random('Normal', 0, 0.5);
     
-%     acoms = {'acoms', dist + random('Normal', 0, 0.5), X(1:2)', Cov(1:2,1:2)};
+%    acoms = {'acoms', dist + random('Normal', 0, 0.5), X(1:2)', Cov(1:2,1:2)};  % ParticleFilter
+%    pf = pf.Update_Acoms(speed, dt, heading, measurment, acoms);
     
-    pf = pf.Acoms(dist, X(1:2)', Cov(1:2,1:2));
-    pf = pf.Update(speed, dt, heading, measurment);
+     pf = pf.Acoms(dist, X(1:2)', Cov(1:2,1:2));                               % TBN
+     pf = pf.Update(speed, dt, heading, measurment);
     
 end
 
 Vehicle.PF = pf;
 
 end
-
-
-
-
-%% Old Stuff  
-
-
-% function [vehicles, err] = Expand_all(vehicles, dt)
-% 
-% err_b = inf;
-% 
-% for a = 0: vehicles(1).count
-%     
-%     if a == 1, continue, end
-%     
-%     [vehicles_, err_, ~] = Evaluate(vehicles, dt, a);
-%     
-%     if err_ < err_b 
-%         vehicles = vehicles_;
-%         err = err_;
-%     end 
-%     
-% end
-% 
-% end
-
-
-% function [vehicles, err, done] = Evaluate(vehicles, dt, action)
-% 
-% done = false(vehicles(1).count,1);
-% err = 0;
-% 
-% if action > 0
-%    X = vehicles(action).PF.X;
-%    Cov = vehicles(action).PF.cov;
-% end
-% 
-% for ii = 1: vehicles(1).count
-%     
-%     if action == 0 || action == ii
-%         [vehicles(ii), done(ii)] = Simulate(vehicles(ii), dt);
-%     else
-%         [vehicles(ii), done(ii)] = Simulate(vehicles(ii), dt, X, Cov);
-%     end
-%     
-%     err_ = trace(vehicles(ii).PF.cov);
-% 
-%     if err_ > err, err = err_; end
-%     
-% end
-% 
-% done = any(done);
-% 
-% end
-
 
 
 

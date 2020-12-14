@@ -35,13 +35,15 @@ if plotIO
 end
 
 
+clustering = true;
 
 coms_policy = zeros(num_auv, 2000);                                         % Peralocate space for coms policy
 disp('Start Communications Planning')
 dt = 0.5;                                                                   % Planning time step
 parfor vv = 1:num_auv                                                       % Do Planning
-    
-    policy = auv(vv).Planning.Plan(2000, dt, maxErr);
+    tic
+    policy = auv(vv).Planning.Plan2(2000, dt, maxErr, 1.25, clustering);
+    fprintf("Comms Policy or vehicle %d tuck %f seconds\n", vv, toc)
     policy(end+1:2000) = false;
     coms_policy(vv, :) = policy;
  
@@ -144,7 +146,7 @@ for iter = 1 :num_trials
                     
                  
                     
-                case 'Policy'
+                case {'Policy', 'PolicyNo', 'PolicyYes'}
                     turn = coms_policy(:,ii);
                     
                     if sum(turn) ~= 1                                                        % Do not allow overlaping communications
@@ -211,7 +213,11 @@ for iter = 1 :num_trials
                     for vv = num_auv:-1:1, d{vv} = stats(vv).err(jj); d{num_auv+1 +vv} = COMMS(jj,vv); end
                     d{num_auv+1} = TIME(jj);
                     
+                    try
                     rAd = rAd.Add_Result(iter, simulations{sim}, d{:}); % Add data to the respective set
+                    catch E
+                        disp(E)
+                    end
                 end
                 
                 save(filepath, 'coms_policy', 'rAd')

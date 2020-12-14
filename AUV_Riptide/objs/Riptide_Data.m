@@ -962,11 +962,7 @@ classdef Riptide_Data
             
             path = path - dxdy;
             
-            try
             [xx, yy] = deg2utm( path(:,1), path(:,2) );
-            catch E
-                disp(E)
-            end
             
             path = [xx,yy];
             
@@ -986,7 +982,6 @@ classdef Riptide_Data
             
             a_     = zeros(10000,1);
             c_     = zeros(10000,1);
-            err_   = zeros(10000,1);
             speed_ = zeros(10000,1);
             altEr_ = zeros(10000,1);
             
@@ -1053,7 +1048,7 @@ classdef Riptide_Data
                 
                 a_(a:b)   = angle(~isnan(angle));
                 c_(a:b)   = compass(~isnan(angle));
-                err_(a:b) = angle - compass;                                % Compass Error
+                
                 
                 
                 % --- Modle Altimiter -------------------------------------
@@ -1066,8 +1061,6 @@ classdef Riptide_Data
                 
                 altEr_(a:b) = gtAlt - alt;
                 
-                
-                
                 a = b+1;
                 
             end
@@ -1076,15 +1069,15 @@ classdef Riptide_Data
             % Get Rid of extra entries
             a_(a:end)     = [];
             c_(a:end)     = [];
-            err_(a:end)   = [];
             speed_(a:end) = [];
             
             % Get rid of zerso
             a_(a_ == 0) = [];
             c_(c_ == 0) = [];
-            err_(err_ == 0)   = [];
             speed_(speed_ == 0) = [];
             
+            
+            % ---- Models -------------------------------------------------
             
             % Speed Model
             mu  = mean(speed_);
@@ -1101,7 +1094,15 @@ classdef Riptide_Data
             
             
             % Compass model
-            mu = nanmean(err);
+            
+            f = fit( c_, a_, modelType);                                    % Make Compass model
+            
+            newA_ = feval(f,c_);                                            % Re-evaluate the compass measurements
+            
+            err_ = newA_ - c_;                                              % Error after Compass fit
+            
+            
+            mu = nanmean(err_);                                             % Compass Stats
             sig = nanstd(err_);
             
             stat.compass.mu = mu;
@@ -1110,7 +1111,7 @@ classdef Riptide_Data
             obj.vehicleModel.compass = makedist('Normal','mu', 0,'sigma',sig);
             obj.vehicleModel.units.compass = 'deg';
             
-            obj.vehicleModel.compassFit     = fit( c_, a_, modelType);
+            obj.vehicleModel.compassFit     = f;
             obj.vehicleModel.compassFit_inv = fit( a_, c_, modelType);
             
             
@@ -1147,7 +1148,7 @@ classdef Riptide_Data
          
         
         % _____ Plotting __________________________________________________________________________
-        function figOut = Plot_Paths(obj, fig_, paths, c)
+        function figOut = Plot_Paths(obj, fig_, paths, c, name_)
             
             
             if nargin > 1 && isa(fig_, 'Geotiff')
@@ -1198,7 +1199,7 @@ classdef Riptide_Data
             ax = gca;
             ax.FontSize = 12;       % Set font size first or else you will loose the rest of the formatting
             
-            title(sprintf("Zig Zag Mission 2: Riptide %s's Paths", obj.name), 'FontSize', 20)
+            title(sprintf("%s: Riptide %s's Paths", name_, obj.name), 'FontSize', 20)
             xlabel('Longitude', 'FontSize', 16)
             ylabel('Latitude',  'FontSize', 16)
             legend([p, p1, p2] ,[mem; {'Start'; 'End'}], 'Interpreter', 'non', 'FontSize', 14)

@@ -273,10 +273,13 @@ classdef RandomAssData
                 hold on
             end
             
+            ax = gca;
+            ax.FontSize = 12;       % Set font size first or else you will loose the rest of the formatting
+
             legend(p, type, 'Location', 'northwest', 'Interpreter', 'none', 'FontSize', 16, 'Box','off')
             xlabel(vs,                               'Interpreter', 'none', 'FontSize', 18)
             ylabel(param,                            'Interpreter', 'none', 'FontSize', 18)
-            title(sprintf('%s vs %s', param, vs),    'Interpreter', 'none', 'FontSize', 18)
+            title(sprintf('%s vs %s', param, vs),    'Interpreter', 'none', 'FontSize', 20)
             hold off
             
         end
@@ -285,7 +288,7 @@ classdef RandomAssData
         % Plot the Stats
         function PlotStat(obj, type, stat, param, vs)
             
-            figure('name', param, 'numbertitle', 'off')
+%             figure('name', param, 'numbertitle', 'off')
             
             n = numel(type);
             
@@ -312,10 +315,14 @@ classdef RandomAssData
                 
             end
             
-            legend(p, type, 'Location', 'northwest', 'Interpreter', 'none', 'FontSize', 16, 'Box','off')
-            xlabel(vs,                               'Interpreter', 'none', 'FontSize', 18)
-            ylabel(param,                            'Interpreter', 'none', 'FontSize', 18)
-            title(sprintf('%s vs %s', param, vs),    'Interpreter', 'none', 'FontSize', 18)
+            ax = gca;
+            ax.FontSize = 12;       % Set font size first or else you will loose the rest of the formatting
+
+            
+%             legend(p, type, 'Location', 'northwest', 'Interpreter', 'none', 'FontSize', 16, 'Box','off')
+%             xlabel(vs,                               'Interpreter', 'none', 'FontSize', 18)
+%             ylabel(param,                            'Interpreter', 'none', 'FontSize', 18)
+%             title(sprintf('%s vs %s', param, vs),    'Interpreter', 'none', 'FontSize', 20)
             hold off
             
         end
@@ -368,10 +375,13 @@ classdef RandomAssData
                 a = a + 5;
             end
             
+            ax = gca;
+            ax.FontSize = 12;       % Set font size first or else you will loose the rest of the formatting
+
             legend(p, type, 'Location', 'northwest', 'Interpreter', 'none', 'FontSize', 16, 'Box','off')
             xlabel(vs,                               'Interpreter', 'none', 'FontSize', 18)
             ylabel(param,                            'Interpreter', 'none', 'FontSize', 18)
-            title(sprintf('%s vs %s', param, vs),    'Interpreter', 'none', 'FontSize', 18)
+            title(sprintf('%s vs %s', param, vs),    'Interpreter', 'none', 'FontSize', 20)
             hold off
             
         end

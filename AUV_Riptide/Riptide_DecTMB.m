@@ -28,7 +28,9 @@ filters = {'GPS_fix', 0};                                                   % Da
 
 
 % Sort Riptide_Acomms
-[~, ~, owtof] = rtAcms.Model_AcommsLatency( RT );                           % Model the latency in acoustic communications and get one way time of flight
+close all
+clc
+[~, ~, owtof] = rtAcms.Model_AcommsLatency( RT , ["CircumNav2_B", "CircumNav2_A", "idel"] );                           % Model the latency in acoustic communications and get one way time of flight
 
 for v = 1:numel(RT)
     RT(v) = RT(v).Add_OWTOF(owtof);                                         % Add one way time of fligth 
@@ -51,11 +53,11 @@ clc
 load('/Users/jake/_OutPuts/RT_FostersLake.mat')                             % Start with a clean copy of the data
 
 % ------ Missions   2020-10-27   ------------------------------------------
-% missions = [1,1];         %    Fosters Lake Mission Set:CircumNav2_B, CircumNave2_A   --> Decent Acomms
- missions = [3,3];         % *! Fosters Lake Mission Set:Dimond1_A, Dimond1_B          --> Good TBN
-% missions = [4,4];         %    Fosters Lake Mission Set:ZZ1, ZZ2                      --> Decent Acomms
-% missions = [5,5];         % *! Fosters Lake Mission Set:Dimond1_A, Dimond1_B          --> (DEC-TBN Does better)
-% missions = [6,6];         % *!! Fosters Lake Mission Set:ZZ4_B, ZZ4_A  
+% missions = [1,1];  name_ = "Mission 0";           %    Fosters Lake Mission Set:CircumNav2_B, CircumNave2_A   --> Decent Acomms
+% missions = [3,3];  name_ = "Mission 1";           % *! Fosters Lake Mission Set:Dimond1_A, Dimond1_B          --> Good TBN
+missions = [4,4];  name_ = "Mission 2";           %    Fosters Lake Mission Set:ZZ1, ZZ2                      --> Decent Acomms
+% missions = [5,5];  name_ = "Mission 3";           % *! Fosters Lake Mission Set:Dimond1_A, Dimond1_B          --> (DEC-TBN Does better)
+% missions = [6,6];  name_ = "Mission 4";           % *!! Fosters Lake Mission Set:ZZ4_B, ZZ4_A  
  
 
 % ----- Setup -------------------------------------------------------------
@@ -63,7 +65,7 @@ load('/Users/jake/_OutPuts/RT_FostersLake.mat')                             % St
 
 for v = 1: numel(RT)
     
-    RT(v) = RT(v).VehicleModeling('poly2', bathy, [1,missions(v)], true);   % Do vehicle modeling that excludes data from the selected mission
+    RT(v) = RT(v).VehicleModeling('poly2', bathy, missions(v) );            % Do vehicle modeling that excludes data from the selected mission
     
     % -- Select mission --
     RT(v) = RT(v).Select_Mission( missions(v) );                            % Choose Mission
@@ -83,7 +85,7 @@ for v = 1: numel(RT)
     RT(v) = RT(v).Add_CommsPloicy( 'Full', true);                           % Add Full DEC-TBP policy with all true
     
     % -- Plot/display Stuff --
-    RT(v).Disp_Manifest;                                                    % Display Vehicle Manifest
+%    RT(v).Disp_Manifest;                                                    % Display Vehicle Manifest
 %    RT(v).Plot_Course(geotiff);
 %     fig1 = RT(v).Plot_Paths(fig1);                                        % Show paths on a geotiff
 %     RT(v).Plot_AltimeterProfile;                                          % Show Altimeter profile
@@ -91,8 +93,7 @@ for v = 1: numel(RT)
 
 end
 
-
-RT(v) = RT(v).CorrectCourse(geotiff);                                       % Correct Nemo's course for the comms planning
+% RT(v) = RT(v).CorrectCourse(geotiff);                                       % Correct Nemo's course for the comms planning
 
 
 [mu, sig] = rtAcms.Mission_Latency(RT);                                     % Get Acoustic modem model for the selected mission
@@ -166,23 +167,61 @@ threshold = 25;
 dt = 30;                % Time step in seconds
 dt_ = seconds(dt);      % time Step as a duration type
 
-for ii = [1: numel(RT); numel(RT): -1: 1], v = ii(1); s = ii(2);
+% _____ Plan Comms Policy _________________________________________________
+% for ii = [1: numel(RT); numel(RT): -1: 1], v = ii(1); s = ii(2);
+%     
+%     fprintf('\nComms Planning for %s', RT(v).name)
+%     
+%     start = RT(v).data.timeStamp(1);
+%     stop  = RT(v).data.timeStamp(end);
+%     
+%     sz = floor( (stop - start)/ dt_ );
+%     
+%     policy = [false; RT(v).commsPlanner.Plan2(sz, dt, cov_max, threshold, false)];        % Generate the policy and append a false to the front since it the planing starts at t = 2
+%     
+%     policyTimes = start: dt_: stop;
+%     
+%     RT(s) = RT(s).Add_CommsPloicy('Plan', policyTimes(policy), dt);         % Tell the other vehicle which communications it can use
+%     
+%     fprintf("Size: %d\n", numel(policy))
+%     
+% end
+
+% _____ Generate Random Comms Policy ______________________________________
+
+rando{6} = [];
+
+for p = {0.8,    0.6,   0.4,    0.2,   0.1,   0.05;
+        'eight' 'six', 'four', 'two', 'one', 'half';
+         1,      2,     3,      4,     5,     6 }
     
-    fprintf('Comms Planning for %s\n', RT(v).name)
     
-    start = RT(v).data.timeStamp(1);
-    stop  = RT(v).data.timeStamp(end);
+    for ii = [1: numel(RT); numel(RT): -1: 1], v = ii(1); s = ii(2);
+        
+        fprintf('\n%f Random Comms for %s\n', p{1}, RT(v).name)
+        
+        start = RT(v).data.timeStamp(1);
+        stop  = RT(v).data.timeStamp(end);
+        
+        sz = floor( (stop - start)/ dt_ );
+        
+        policy = false(sz+1,1);
+        
+        comms = randi(sz+1, floor(sz*p{1}), 1 );        % Generate the policy and append a false to the front since it the planing starts at t = 2
+        
+        policy(comms) = true;
+        
+        policyTimes = start: dt_: stop;
+        
+        RT(s) = RT(s).Add_CommsPloicy( sprintf('Random_%s', p{2}), policyTimes(policy), dt);         % Tell the other vehicle which communications it can use
+        
+        fprintf("Size: %d\t# of comms: %d\n", numel(policy), sum(policy) )
+        
+    end
     
-    sz = floor( (stop - start)/ dt_ );
-    
-    policy = [false; RT(v).commsPlanner.Plan2(sz, dt, cov_max, threshold, false)];        % Generate the policy and append a false to the front since it the planing starts at t = 2
-    
-    policyTimes = start: dt_: stop;
-    
-    RT(s) = RT(s).Add_CommsPloicy('Plan', policyTimes(policy), dt);         % Tell the other vehicle which communications it can use
+    rando{p{3}} = sprintf('Random_%s', p{2});
     
 end
-
 
 clear ii v s dt dt_ policy policyTimes sz stop start
 
@@ -194,7 +233,8 @@ clear ii v s dt dt_ policy policyTimes sz stop start
 num_trials = 1;
 
 % --- Instanciate rAd to track data ---
-paths = {'DR_Corrected', 'TBN', 'Full', 'Plan'};                             % Set up rAd with DR corrected data
+% paths = [{'DR_Corrected', 'TBN', 'Full', 'Plan'}, rando];                  % Set up rAd with DR corrected data
+paths = rando;
 types = {'Dory_Error', 'Nemo_Error', 'Joint_Error', 'Time'};
 
 [rAd, gtPaths] = GetRAD(RT, paths, types, num_trials, timeLine);            % Create rAd with DR Correctd data entered
@@ -218,7 +258,8 @@ clear prop
 
 
 % --- TBN Simulation ---
-for dec_tbn = {'TBN', 'Full', 'Plan'}                                       % Switch between TBN and DEC-TBN
+% for dec_tbn = {'TBN', 'Full', 'Plan', 'Random'}                             % Switch between TBN and DEC-TBN
+for dec_tbn = paths                                                         % Switch between TBN and DEC-TBN
     
     for iter = 1: num_trials
         
@@ -245,16 +286,21 @@ rAd = rAd.Eval_Stats('Time');                                               % De
 
 
 % ____ Display Graphs _____________________________________________________
+close all
+open('/Users/jake/OSU/RDML/Multi_Robot_Localization/Riptide/FostersLake/Figures/2020-11-21_Mission2_jointError.fig')
 
-DisplyRAD(rAd, types, paths)                                                % Display Result Stats
+hold on
 
-fprintf("Duration %.2f [sec]", seconds(timeLine(end) - timeLine(1)))
+DisplyRAD(rAd, types{3}, paths)                                                % Display Result Stats
 
-for v = 1:numel(RT)
-    
-     RT(v).Plot_Paths(geotiff, [{'GT'}, paths]);                            % Plot lat-lon path on geotiff
-   
-end
+fprintf("Duration %.2f [sec]\n\n", seconds(timeLine(end) - timeLine(1)))
+
+
+% for v = 1:numel(RT)
+%     
+%      RT(v).Plot_Paths(geotiff, [{'GT'}, paths], 'grbcm', name_);            % Plot lat-lon path on geotiff
+%    
+% end
 
 
 
@@ -356,8 +402,9 @@ end
 %% Display rAd stats
 function DisplyRAD(rAd, types, paths)
 
-%for t = types(1:3), rAd.PlotData( paths, t{1}, 'Time'), end
-for t = types(1:3), rAd.PlotStat( paths, 'Ave', t{1}, 'Time'), end
+% for t = types(1:3), rAd.PlotData( paths, t{1}, 'Time'), end
+% for t = types(1:3), rAd.PlotStat( paths, 'Ave', t{1}, 'Time'), end
+rAd.PlotStat( paths, 'Ave', types, 'Time')
 
 fprintf('\n\n\n')
 

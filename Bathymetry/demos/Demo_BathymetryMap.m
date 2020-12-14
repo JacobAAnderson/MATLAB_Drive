@@ -36,7 +36,7 @@ bathy_map = Bathymetry_Map(filePath, station_ID);                           % Cr
 
 
 %% Display Bathymetry
-fig1 = bathy_map.Plot_3DModel(250, 30);                                     % Plot Bathymetry Model
+fig1 = bathy_map.Plot_3DModel(250, 30);                                     % Plot Bathymetry Model with view angle
 
 if ~isempty(geotiff.Image)
     fig2 = bathy_map.PlotMap(geotiff);                                      % Plot Map over the Geotiff 

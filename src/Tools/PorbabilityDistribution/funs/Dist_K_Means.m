@@ -97,7 +97,7 @@ for t = 1:500
     
 
     if all(shift < 0.0003)
-        fprintf('\n\nCentroids are stable after %d iterations\n\n', t)
+%         fprintf('\n\nCentroids are stable after %d iterations\n\n', t)
         break
     end
     

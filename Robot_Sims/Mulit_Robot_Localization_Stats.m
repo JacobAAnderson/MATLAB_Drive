@@ -11,8 +11,8 @@ ui = SavedUserInputs(mfilename);                                            % In
 ui = ui.NewData(false);                                                     % Indicate whether new data should be selescted by the user
 
 num_auv = 2;
-trials = 30;
-simulations = {'Policy', 'half', 'quart'};
+trials = 1;
+simulations = {'PolicyNo', 'PolicyYes'};
 maxErr = 1.25;
 
 %% Get Data Sources
@@ -40,7 +40,7 @@ bathy = bathy.ReduceResolution(0.5);
 
 % rAd = Simulation1(trials, simulations, bathy, file_saveResults, file_wp1, file_wp2, false);
 % rAd = Simulation2(trials, num_auv, simulations, bathy, file_saveResults, file_wp, 1, false);
-[rAd, coms_policy] = Simulation3(trials, num_auv, maxErr, simulations, bathy, file_saveResults, file_wp, 1, false);
+[rAd, coms_policy] = Simulation3(trials, num_auv, maxErr, simulations, bathy, file_saveResults, file_wp, 1, true);
 
 
 clear bathy trials

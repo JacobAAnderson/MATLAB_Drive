@@ -11,7 +11,7 @@ classdef Riptide_Acomms
     methods
         
         % Model Acoustic Communication Latency
-        function [mu, sig, OWTOF] = Model_AcommsLatency(~, RT )
+        function [mu, sig, OWTOF] = Model_AcommsLatency(~, RT, skip )
             
             dtfs = DateTime_Funs;                                           % Date Time Functions
             disfmt = 'yyyy-MM-dd  HH:mm:ss.SSSSSS';
@@ -50,6 +50,29 @@ classdef Riptide_Acomms
             tof(2).t = NaT(sz(3),4, 'Format', disfmt);
             tof(1).t(1:sz(1),:) = cat(1,RT(1).rawAcomms.pAcomms_tof);       % Time of flight
             tof(2).t(1:sz(2),:) = cat(1,RT(2).rawAcomms.pAcomms_tof);
+            
+            
+            % --- Skip specified missions ---
+            if nargin == 3
+                
+                m = cell(sz(3),2);
+                m(1:sz(1),1) = cat(1,RT(1).rawAcomms.mission);
+                m(1:sz(2),2) = cat(1,RT(2).rawAcomms.mission);
+                
+                idx = cellfun(@isempty, m);
+                
+                m(idx) = {'n-a'};
+                
+                for ii = 1:2
+                
+                    idx = ismember(m(:,ii),skip); %  | ismember(m(:,ii),skip(2));
+                    
+                    rx(idx,ii) = NaT;
+                    tx(idx,ii) = NaT;
+                
+                end
+            end
+            
             
             a = numel(RT);
             
@@ -140,7 +163,7 @@ classdef Riptide_Acomms
             dtfs = DateTime_Funs;                                           % Date Time Functions
             disfmt = 'yyyy-MM-dd  HH:mm:ss.SSSSSS';
             
-            fprintf('\n\nLatency in acoustic Communications:\n\n')
+            fprintf('\nLatency in acoustic Communications:\n')
             
             % ---- Colect Acoms data --------------------------------------------------
             v1 = cat(1,RT(1).acomms.vehicle);                               % Vehicle location
@@ -231,14 +254,14 @@ classdef Riptide_Acomms
                 mu(s)  = seconds( nanmean(err(:)) );                        % Average latency
                 sig(s) = seconds( nanstd(err(:))  );                        % Standard deviation in latency
                 
-                fprintf('Vehicle %s to %s\n', RT(s).name, RT(r).name)
-                fprintf('Ave: %s,\tSTD: %s\n',mu(s), sig(s))
-                fprintf('Population: %d\n\n', size(set,1))
+%                 fprintf('Vehicle %s to %s\n', RT(s).name, RT(r).name)
+%                 fprintf('Ave: %s,\tSTD: %s\n',mu(s), sig(s))
+%                 fprintf('Population: %d\n\n', size(set,1))
                 
   
             end
             
-            fprintf('\n\n')
+%             fprintf('\n\n')
             
         end
         
